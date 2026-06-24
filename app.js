@@ -966,13 +966,21 @@
       setTimeout(() => $('dpProgress').classList.remove('err'), 2500);
       return;
     }
-    trk('dingpan_submit', { total: total, answered: answered });
     const result = computeDpScore();
     state.dpScore = result.overall;
-    // 埋点：定盘结果（含四维分项）
+    // 埋点：定盘提交（点击「提交」即带上评分结果与四维分项）
     (function () {
       var ds = result.dimScore || {};
       function pct(d) { return (ds[d] && ds[d].pct != null) ? Math.round(ds[d].pct) : null; }
+      var payload = {
+        total: total,
+        answered: answered,
+        score: result.overall,
+        passed: result.overall >= JIEPAN_PASS,
+        d1: pct('d1'), d2: pct('d2'), d3: pct('d3'), d4: pct('d4'),
+      };
+      trk('dingpan_submit', payload);
+      // 兼容历史：保留独立的结果事件
       trk('dingpan_result', {
         score: result.overall,
         passed: result.overall >= JIEPAN_PASS,
