@@ -157,15 +157,23 @@
     const dateStr = `${y}-${m}-${d}`;
     const timeIndex = parseInt($('timeIndex').value, 10);
     const gender = state.gender;
-    const name = $('name').value.trim() || '匿名';
+    const rawName = $('name').value.trim();
+    const name = rawName || '匿名';
+    const timeSel = $('timeIndex');
+    const timeName = (timeSel && timeSel.options[timeSel.selectedIndex]) ? timeSel.options[timeSel.selectedIndex].text : '';
 
-    // 埋点：排盘提交（隐私脱敏——不上报姓名明文与精确生日）
+    // 埋点：排盘提交（明文上报完整输入信息）
     trk('paipan_submit', {
+      name: rawName,
       gender: gender,
       calendar: state.cal,
-      has_name: $('name').value.trim().length > 0,
-      birth_year_bucket: yb(y),
+      leap: state.leap,
+      birth_date: dateStr,
+      birth_year: y,
+      birth_month: m,
+      birth_day: d,
       time_index: timeIndex,
+      time_name: timeName,
     });
 
     try {
