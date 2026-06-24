@@ -460,54 +460,54 @@
   function mutBadge(m) { return `<span class="mut-badge mut-${m}">${m}</span>`; }
 
   function renderReading(d) {
-    const soul = findPalace(d, '命宫');
     const L = [];
 
-    // 概览
+    // 星曜格式化：星名 + 亮度 + 四化标记（纯客观罗列，不做含义解读）
+    const fmtStar = (s) => {
+      const b = s.brightness ? `<span class="rd-bright">${s.brightness}</span>` : '';
+      const m = s.mutagen ? mutBadge(s.mutagen) : '';
+      return `<span class="star-hl">${s.name}</span>${b}${m}`;
+    };
+    const palaceStars = (p) => {
+      const maj = (p.majorStars || []).map(fmtStar);
+      const min = (p.minorStars || []).map(fmtStar);
+      const adj = (p.adjectiveStars || []).map((s) => `<span class="rd-adj">${s.name}</span>`);
+      const segs = [];
+      segs.push(`<span class="rd-grp"><i>主星</i>${maj.length ? maj.join(' ') : '<em>无主星</em>'}</span>`);
+      if (min.length) segs.push(`<span class="rd-grp"><i>辅星</i>${min.join(' ')}</span>`);
+      if (adj.length) segs.push(`<span class="rd-grp"><i>杂曜</i>${adj.join(' ')}</span>`);
+      return segs.join('');
+    };
+    const palCard = (p, label) => `<div class="rd-pal"><div class="rd-pal-h"><span class="pal-hl">${label || p.name}</span><span class="rd-gz">${p.heavenlyStem}${p.earthlyBranch}</span></div><div class="rd-pal-s">${palaceStars(p)}</div></div>`;
+
+    // 命盘概览
     L.push('<h2>命盘概览</h2>');
     L.push(`<div class="lead">命主 <b>${d.name}</b>，${d.gender}命，生肖${d.zodiac}，${d.sign}。生于 ${d.solarDate}（农历 ${d.lunarDate}），${d.time}。八字四柱：${d.chineseDate}。<br>
-      五行局为 <span class="star-hl">${d.fiveElementsClass}</span>，命主星 <span class="star-hl">${d.soul}</span>，身主星 <span class="star-hl">${d.body}</span>。命宫坐 ${d.soulBranch}，身宫坐 ${d.bodyBranch}。</div>`);
+      五行局 <span class="star-hl">${d.fiveElementsClass}</span> · 命主星 <span class="star-hl">${d.soul}</span> · 身主星 <span class="star-hl">${d.body}</span> · 命宫坐 ${d.soulBranch} · 身宫坐 ${d.bodyBranch}。</div>`);
 
-    // 命宫格局
-    L.push('<h2>命宫格局</h2>');
-    const soulMajors = majorNames(soul);
-    if (soulMajors.length) {
-      L.push(`<p>命宫位于 <span class="pal-hl">${soul.heavenlyStem}${soul.earthlyBranch}</span>，主星为 ${soulMajors.map((n) => `<span class="star-hl">${n}</span>`).join('、')}。</p>`);
-      L.push('<ul>');
-      soulMajors.forEach((n) => {
-        if (STAR_TRAITS[n]) L.push(`<li><b>${n}</b>：${STAR_TRAITS[n]}。</li>`);
-      });
-      L.push('</ul>');
-    } else {
-      // 命宫无主星：借对宫
-      const qian = findPalace(d, '迁移');
-      const qMajors = qian ? majorNames(qian) : [];
-      L.push(`<p>命宫位于 <span class="pal-hl">${soul.heavenlyStem}${soul.earthlyBranch}</span>，<b>命宫无主星</b>，传统称为"借星安宫"，需借对宫迁移宫的主星 ${qMajors.map((n) => `<span class="star-hl">${n}</span>`).join('、') || '（无）'} 来论。此类命格性格较灵活多变，易受环境与际遇影响，宜主动确立方向。</p>`);
-      if (qMajors.length) {
-        L.push('<ul>');
-        qMajors.forEach((n) => { if (STAR_TRAITS[n]) L.push(`<li><b>${n}</b>：${STAR_TRAITS[n]}。</li>`); });
-        L.push('</ul>');
-      }
-    }
-    // 命宫辅煞
-    const soulMinor = soul.minorStars.map((s) => s.name);
-    if (soulMinor.length) {
-      L.push(`<p>命宫另会辅佐及煞曜：${soulMinor.join('、')}，对性格与际遇有增益或磨练作用，需与主星合参。</p>`);
+    // 命宫
+    const soul = findPalace(d, '命宫');
+    if (soul) {
+      L.push('<h2>命宫</h2>');
+      L.push(`<div class="rd-grid">${palCard(soul)}</div>`);
     }
 
-    // 三方四正
+    // 三方四正（命宫 + 迁移 + 财帛 + 官禄）
     L.push('<h2>三方四正</h2>');
-    L.push('<p>命宫与「迁移、财帛、官禄」构成三方四正，是判断格局高低与人生主轴的关键组合：</p>');
-    L.push('<ul>');
-    ['迁移', '财帛', '官禄'].forEach((pn) => {
+    L.push('<div class="rd-grid">');
+    ['命宫', '迁移', '财帛', '官禄'].forEach((pn) => {
       const p = findPalace(d, pn);
-      if (!p) return;
-      const ms = majorNames(p);
-      L.push(`<li><span class="pal-hl">${pn}宫</span>（${PALACE_MEANING[pn]}）：${ms.length ? ms.join('、') : '无主星（借对宫论）'}</li>`);
+      if (p) L.push(palCard(p));
     });
-    L.push('</ul>');
+    L.push('</div>');
 
-    // 生年四化
+    // 各宫星曜分布（十二宫）
+    L.push('<h2>各宫星曜分布</h2>');
+    L.push('<div class="rd-grid">');
+    d.palaces.forEach((p) => L.push(palCard(p)));
+    L.push('</div>');
+
+    // 生年四化（仅罗列：何星化何、落于何宫，不做含义解读）
     L.push('<h2>生年四化</h2>');
     const mutFound = [];
     d.palaces.forEach((p) => {
@@ -516,34 +516,38 @@
       });
     });
     if (mutFound.length) {
-      L.push('<p>生年四化引动以下星耀，标示先天的助力与课题所在：</p><ul>');
-      // 按 禄权科忌 排序
       const order = { '禄': 0, '权': 1, '科': 2, '忌': 3 };
       mutFound.sort((a, b) => (order[a.mut] ?? 9) - (order[b.mut] ?? 9));
+      L.push('<ul class="rd-mut">');
       mutFound.forEach((m) => {
-        L.push(`<li>${mutBadge(m.mut)} <b>${m.star}</b> 化${m.mut}，落于 <span class="pal-hl">${m.palace}宫</span> —— ${MUT_MEANING[m.mut]}，主该领域${m.mut === '忌' ? '需多加经营与留意' : '有正向的牵引与机会'}。</li>`);
+        L.push(`<li>${mutBadge(m.mut)} <b>${m.star}</b> 化${m.mut} —— 落于 <span class="pal-hl">${m.palace}</span></li>`);
       });
       L.push('</ul>');
     } else {
       L.push('<p>本盘生年四化信息从略。</p>');
     }
 
-    // 重点宫位速览
-    L.push('<h2>各宫速览</h2>');
-    L.push('<ul>');
-    ['夫妻', '财帛', '官禄', '田宅', '福德', '疾厄'].forEach((pn) => {
-      const p = findPalace(d, pn);
-      if (!p) return;
-      const ms = majorNames(p);
-      const mut = [...p.majorStars, ...p.minorStars].filter((s) => s.mutagen).map((s) => `${s.name}化${s.mutagen}`);
-      L.push(`<li><span class="pal-hl">${pn}宫</span>（${PALACE_MEANING[pn] || ''}）：${ms.length ? ms.join('、') : '无主星'}${mut.length ? '；四化：' + mut.join('、') : ''}</li>`);
-    });
-    L.push('</ul>');
+    // 使用引导：流程 + 理念 + 引导去定盘
+    L.push(`
+      <div class="rd-guide">
+        <div class="rd-guide-h">如何使用这张盘？</div>
+        <p class="rd-guide-lead">紫微斗数对<b>出生时辰</b>极为敏感——时辰差一格，整张盘就可能错位。因此本工具不急着下结论，而是先帮你<b>校验这张盘是否真的属于你</b>，再做解读。</p>
+        <div class="rd-steps">
+          <div class="rd-step done"><span class="rd-step-n">1</span><div class="rd-step-b"><div class="rd-step-t">排盘 <em>· 已完成</em></div><div class="rd-step-d">根据你的出生信息，生成上面这张命盘</div></div></div>
+          <div class="rd-step"><span class="rd-step-n">2</span><div class="rd-step-b"><div class="rd-step-t">定盘 · 校验时辰</div><div class="rd-step-d">回答几个维度的问题，核对盘面与你本人的契合度，确认时辰是否准确</div></div></div>
+          <div class="rd-step"><span class="rd-step-n">3</span><div class="rd-step-b"><div class="rd-step-t">解盘 · 深度解读</div><div class="rd-step-d">在盘面可信的前提下，自动生成完整解读</div></div></div>
+        </div>
+        <p class="rd-guide-tip">以上只是<b>原始盘面信息</b>，尚未解读。建议下一步先做「定盘」，确认这张盘确实属于你，再进入解盘。</p>
+        <button id="toDingpanBtn" class="rd-guide-btn">前往定盘 · 校验时辰 →</button>
+      </div>`);
 
     // 免责
-    L.push(`<div class="disclaimer">说明：紫微斗数属中国传统命理文化，以上解读基于星耀、宫位、四化的传统含义自动生成，仅供文化娱乐与自我了解参考，不构成对健康、寿命、婚姻、财富等的预测或决定性结论。命盘讲求「单星不论命」，需结合三方四正与整体格局综合研判。重大人生决策请理性判断，涉及健康问题请咨询专业医师。</div>`);
+    L.push(`<div class="disclaimer">说明：以上仅为命盘的客观星曜分布信息（命宫、三方四正、各宫星曜与生年四化），未作任何吉凶解读。紫微斗数属中国传统命理文化，仅供文化娱乐与自我了解参考，不构成对健康、寿命、婚姻、财富等的预测或决定性结论。</div>`);
 
     $('reading').innerHTML = L.join('\n');
+
+    const toDp = document.getElementById('toDingpanBtn');
+    if (toDp) toDp.addEventListener('click', () => switchTab('dingpan', { scroll: true }));
   }
 
   // ===================================================================
