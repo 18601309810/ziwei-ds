@@ -14,20 +14,20 @@
     // 'umami'  : Umami（填 umami.scriptUrl + websiteId）
     // 'custom' : 自有后端 / Serverless（填 endpoint，方案 B 用）
     // 'none'   : 关闭上报（仅本地 DEBUG 打印）
-    provider: 'ga4',
+    provider: 'umami',
 
     ga4: {
       measurementId: '',          // ← 填你的 GA4 衡量 ID，例如 'G-ABC123XYZ'
     },
     umami: {
-      scriptUrl: '',              // 例如 'https://cloud.umami.is/script.js'
-      websiteId: '',
+      scriptUrl: 'https://cloud.umami.is/script.js',  // 官方云默认地址；自托管则改为你的域名
+      websiteId: 'b7ecfaac-607b-4a0c-8cce-e7b1ac780ffd',  // Umami Website ID
     },
     custom: {
       endpoint: '',               // 方案 B 的上报接口，例如 'https://xxx/api/collect'
     },
 
-    debug: true,                  // 控制台打印每条事件，便于本地验证；上线可设 false
+    debug: false,                 // 控制台打印每条事件，便于本地验证；上线可设 false
     sampleRate: 1.0,              // 采样率 0~1，流量大时可降采样
     batchSize: 10,                // 攒批阈值：满 N 条 flush（custom 用）
     flushIntervalMs: 5000,        // 定时 flush 间隔（custom 用）
