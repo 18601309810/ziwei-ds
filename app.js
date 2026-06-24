@@ -78,6 +78,29 @@
     return Math.floor((h + 1) / 2); // 丑1 寅2 … 亥11
   }
 
+  // 顶部两条吸顶栏（topbar + tabs）的合计高度
+  function stickyOffset() {
+    const tb = document.querySelector('.topbar');
+    const tabs = document.querySelector('.tabs');
+    return (tb ? tb.offsetHeight : 0) + (tabs ? tabs.offsetHeight : 0);
+  }
+
+  // 滚动到「当前 tab 内容顶部」——刚好落在两条吸顶栏下方，
+  // 既不被遮挡，也不会把上方个人信息表单露出来。
+  function scrollToContentTop(smooth) {
+    const pane = document.querySelector('.tab-pane.active');
+    if (!pane) return;
+    const y = pane.getBoundingClientRect().top + window.pageYOffset - stickyOffset();
+    window.scrollTo({ top: Math.max(0, y), behavior: smooth === false ? 'auto' : 'smooth' });
+  }
+
+  // 把指定元素滚动到吸顶栏下方（用于定盘结果等局部定位）
+  function scrollElBelowSticky(el, extra) {
+    if (!el) return;
+    const y = el.getBoundingClientRect().top + window.pageYOffset - stickyOffset() - (extra || 12);
+    window.scrollTo({ top: Math.max(0, y), behavior: 'smooth' });
+  }
+
   // 分段按钮通用绑定
   function bindSeg(segId, key, onChange) {
     const seg = $(segId);
@@ -118,7 +141,9 @@
   }
 
   // ---------- Tab 切换 ----------
-  function switchTab(key) {
+  // opts.scroll: 切换后是否把内容滚动到吸顶栏正下方（用户点击 tab / 流程跳转时为 true）
+  function switchTab(key, opts) {
+    opts = opts || {};
     const tabs = $('tabs');
     const prev = (tabs.querySelector('.tab.active') || {}).dataset ? tabs.querySelector('.tab.active').dataset.tab : '';
     tabs.querySelectorAll('.tab').forEach((b) => b.classList.toggle('active', b.dataset.tab === key));
@@ -129,12 +154,13 @@
     if (key !== prev) trk('tab_switch', { from: prev, to: key });
     if (key === 'dingpan') { trk('dingpan_enter', {}); syncDingpan(); }
     if (key === 'jiepan') { trk('jiepan_enter', {}); syncJiepan(); }
+    if (opts.scroll) requestAnimationFrame(function () { scrollToContentTop(true); });
   }
 
   function initTabs() {
     const tabs = $('tabs');
     tabs.querySelectorAll('.tab').forEach((btn) => {
-      btn.addEventListener('click', () => switchTab(btn.dataset.tab));
+      btn.addEventListener('click', () => switchTab(btn.dataset.tab, { scroll: true }));
     });
   }
 
@@ -216,7 +242,8 @@
       state.dpScore = null;
       state.jiepan = { unlocked: false, html: '' };
       syncJiepan();
-      $('result').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      // 滚动到排盘内容顶部，落在吸顶栏下方（避免盘面被遮挡）
+      requestAnimationFrame(function () { scrollToContentTop(true); });
     } catch (e) {
       console.error(e);
       showErr('排盘失败：' + (e && e.message ? e.message : '请检查输入'));
@@ -989,7 +1016,8 @@
     })();
     renderDpResult(result);
     $('dpResult').style.display = 'block';
-    $('dpResult').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    // 把评分结果滚动到吸顶栏下方，避免被遮挡
+    requestAnimationFrame(function () { scrollElBelowSticky($('dpResult'), 12); });
   }
 
   function computeDpScore() {
@@ -1142,7 +1170,8 @@
           state.jiepan.html = buildJiepan(state.data);
           switchTab('jiepan');
           syncJiepan();
-          window.scrollTo({ top: 0, behavior: 'smooth' });
+          // 保持 tab 吸顶，仅滚动到解盘内容顶部（不露出上方个人信息表单）
+          requestAnimationFrame(function () { scrollToContentTop(true); });
         }
       });
     });
@@ -1626,14 +1655,14 @@
         $('formPanel').scrollIntoView({ behavior: 'smooth', block: 'start' });
       } else if (nav === 'dingpan') {
         switchTab('dingpan');
-        window.scrollTo({ top: 0, behavior: 'smooth' });
+        requestAnimationFrame(function () { scrollToContentTop(true); });
       } else if (nav === 'dojiepan') {
         trk('jiepan_unlock', { score: state.dpScore, from: 'jiepan_gate' });
         trk('jiepan_generate', { score: state.dpScore });
         state.jiepan.unlocked = true;
         state.jiepan.html = buildJiepan(state.data);
         syncJiepan();
-        window.scrollTo({ top: 0, behavior: 'smooth' });
+        requestAnimationFrame(function () { scrollToContentTop(true); });
       }
     });
   }
