@@ -111,6 +111,8 @@
     },
     umami: {
       ready: false,
+      _pending: [],      // umami 脚本就绪前暂存的事件
+      _polling: false,
       init: function () {
         var c = CONFIG.umami;
         if (!c.scriptUrl || !c.websiteId) return;
@@ -120,10 +122,34 @@
         s.setAttribute('data-website-id', c.websiteId);
         document.head.appendChild(s);
         this.ready = true;
+        this._poll();   // 启动就绪轮询，准备补发暂存事件
+      },
+      _isUp: function () {
+        return window.umami && typeof window.umami.track === 'function';
+      },
+      _drain: function () {
+        var p = this._pending; this._pending = [];
+        for (var i = 0; i < p.length; i++) {
+          try { window.umami.track(p[i].event_name, p[i]); } catch (e) {}
+        }
+      },
+      _poll: function () {
+        var self = this;
+        if (self._polling) return;
+        self._polling = true;
+        var tries = 0;
+        var timer = setInterval(function () {
+          tries++;
+          if (self._isUp()) { clearInterval(timer); self._polling = false; self._drain(); }
+          else if (tries > 100) { clearInterval(timer); self._polling = false; } // 最长约 20s 放弃
+        }, 200);
       },
       send: function (evt) {
-        if (window.umami && typeof window.umami.track === 'function') {
-          window.umami.track(evt.event_name, evt);
+        if (this._isUp()) {
+          try { window.umami.track(evt.event_name, evt); } catch (e) {}
+        } else {
+          this._pending.push(evt);   // 未就绪：先暂存，就绪后补发
+          this._poll();
         }
       },
     },
