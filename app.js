@@ -55,6 +55,12 @@
     '寅': [3, 0], '丑': [3, 1], '子': [3, 2], '亥': [3, 3],
   };
 
+  // ---------- 埋点（容错包装，tracker.js 缺失也不报错） ----------
+  function trk(name, props) {
+    try { if (window.ZT && ZT.track) ZT.track(name, props || {}); } catch (e) {}
+  }
+  function yb(y) { try { return (window.ZT && ZT.yearBucket) ? ZT.yearBucket(y) : ''; } catch (e) { return ''; } }
+
   // ---------- DOM ----------
   const $ = (id) => document.getElementById(id);
   const state = {
@@ -114,13 +120,15 @@
   // ---------- Tab 切换 ----------
   function switchTab(key) {
     const tabs = $('tabs');
+    const prev = (tabs.querySelector('.tab.active') || {}).dataset ? tabs.querySelector('.tab.active').dataset.tab : '';
     tabs.querySelectorAll('.tab').forEach((b) => b.classList.toggle('active', b.dataset.tab === key));
     ['paipan', 'dingpan', 'jiepan'].forEach((k) => {
       const pane = $('tab-' + k);
       if (pane) pane.classList.toggle('active', k === key);
     });
-    if (key === 'dingpan') syncDingpan();
-    if (key === 'jiepan') syncJiepan();
+    if (key !== prev) trk('tab_switch', { from: prev, to: key });
+    if (key === 'dingpan') { trk('dingpan_enter', {}); syncDingpan(); }
+    if (key === 'jiepan') { trk('jiepan_enter', {}); syncJiepan(); }
   }
 
   function initTabs() {
@@ -151,6 +159,15 @@
     const gender = state.gender;
     const name = $('name').value.trim() || '匿名';
 
+    // 埋点：排盘提交（隐私脱敏——不上报姓名明文与精确生日）
+    trk('paipan_submit', {
+      gender: gender,
+      calendar: state.cal,
+      has_name: $('name').value.trim().length > 0,
+      birth_year_bucket: yb(y),
+      time_index: timeIndex,
+    });
+
     try {
       let astrolabe;
       if (state.cal === 'lunar') {
@@ -169,6 +186,21 @@
       $('result').style.display = 'flex';
       $('exportBtn').disabled = false;
       statusEl.textContent = '排盘完成 ✓';
+
+      // 埋点：排盘成功（命盘特征，无个人身份信息）
+      (function () {
+        var d = state.data || {};
+        var mp = (d.palaces || []).find(function (p) { return p.name === '命宫'; });
+        var mainStars = mp ? (mp.majorStars || []).map(function (s) { return s.name; }) : [];
+        trk('paipan_success', {
+          five_element: (d.fiveElementsClass || ''),
+          soul_star: (d.soul || ''),
+          body_star: (d.body || ''),
+          main_stars: mainStars,
+          zodiac: (d.zodiac || ''),
+          sign: (d.sign || ''),
+        });
+      })();
 
       // 命盘已更新，重置定盘问卷与解盘解锁状态
       state.dpQuestions = [];
@@ -580,7 +612,7 @@
   function buildDpQuestions(d) {
     const qs = [];
     let qid = 0;
-    const add = (dim, claim, ask) => { qs.push({ id: 'q' + (qid++), dim, claim, ask: ask || '以上描述与你本人的真实情况符合吗？' }); };
+    const add = (dim, claim, ask, meta) => { qs.push(Object.assign({ id: 'q' + (qid++), dim, claim, ask: ask || '以上描述与你本人的真实情况符合吗？' }, meta || {})); };
 
     // —— 维度1：性格外貌（命宫主星，无主星借迁移）——
     const soulMs = pMajors(d, '命宫');
@@ -645,7 +677,8 @@
       const tag = isCurrent ? '（你正走在这步大限）' : '';
       add('d3',
         `<span class="q-hl">${dec.start}–${dec.end}岁</span>${yrSpan}这十年${tag}，你的大限走入 <span class="q-pal">${pal.name}宫</span>${ms.length ? `（${ms.join('、')}）` : '（无主星）'}${muts.length ? `，引动 ${muts.join('、')}` : ''}。命盘判断：<span class="q-key">${claim}</span>`,
-        `请具体回想这十年里实际发生过的大事（${stageHint(dec.start)}），上面这个判断对得上吗？`);
+        `请具体回想这十年里实际发生过的大事（${stageHint(dec.start)}），上面这个判断对得上吗？`,
+        { range: `${dec.start}-${dec.end}` });
     });
     // 兜底：万一一道大限题都没生成（如出生年缺失无法算虚岁），给一道总括题
     if (!qs.some((q) => q.dim === 'd3')) {
@@ -871,6 +904,16 @@
         const qid = el.dataset.qid;
         const sc = el.dataset.score;
         state.dpAnswers[qid] = (sc === 'na') ? null : parseFloat(sc);
+        // 埋点：单题作答
+        (function () {
+          var q = state.dpQuestions.find(function (x) { return x.id === qid; }) || {};
+          trk('dingpan_answer', {
+            dim: q.dim || '',
+            q_id: qid,
+            choice: (sc === 'na') ? 'unsure' : parseFloat(sc),
+            decadal_range: q.range || '',
+          });
+        })();
         // 更新同题选中态
         const group = el.parentElement;
         group.querySelectorAll('.dp-opt').forEach((b) => {
@@ -915,8 +958,19 @@
       setTimeout(() => $('dpProgress').classList.remove('err'), 2500);
       return;
     }
+    trk('dingpan_submit', { total: total, answered: answered });
     const result = computeDpScore();
     state.dpScore = result.overall;
+    // 埋点：定盘结果（含四维分项）
+    (function () {
+      var ds = result.dimScore || {};
+      function pct(d) { return (ds[d] && ds[d].pct != null) ? Math.round(ds[d].pct) : null; }
+      trk('dingpan_result', {
+        score: result.overall,
+        passed: result.overall >= JIEPAN_PASS,
+        d1: pct('d1'), d2: pct('d2'), d3: pct('d3'), d4: pct('d4'),
+      });
+    })();
     renderDpResult(result);
     $('dpResult').style.display = 'block';
     $('dpResult').scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -1061,10 +1115,13 @@
       btn.addEventListener('click', () => {
         const nav = btn.dataset.nav;
         if (nav === 'paipan') {
+          trk('nav_repaipan', { from: 'dingpan_result', score: state.dpScore });
           switchTab('paipan');
           $('formPanel').style.display = 'block';
           $('formPanel').scrollIntoView({ behavior: 'smooth', block: 'start' });
         } else if (nav === 'dojiepan') {
+          trk('jiepan_unlock', { score: state.dpScore, from: 'dingpan_result' });
+          trk('jiepan_generate', { score: state.dpScore });
           state.jiepan.unlocked = true;
           state.jiepan.html = buildJiepan(state.data);
           switchTab('jiepan');
@@ -1454,12 +1511,15 @@
     if (!pane) return;
     const hasChart = !!state.data;
     const score = state.dpScore;
+    // 仅当用户真正处于解盘 tab 时才记录门禁事件（避免 init/重排盘时的后台同步误报）
+    const viewing = pane.classList.contains('active');
 
     if (!hasChart) {
       pane.innerHTML = jiepanGate('paipan',
         '解盘前，请先完成排盘和定盘',
         '为保证解读的严谨，解盘必须建立在一张<b>已校验</b>的命盘之上。请先到「排盘」页填写出生信息生成命盘，再到「定盘」页完成时辰校验；只有定盘契合分达到 ' + JIEPAN_PASS + ' 分，才会开放解盘。',
         '前往排盘 →', 'paipan');
+      if (viewing) trk('jiepan_gate_block', { reason: 'no_chart', score: null });
       bindGateBtn(pane);
       return;
     }
@@ -1477,11 +1537,13 @@
           '解盘尚未解锁',
           `解盘必须在「定盘」契合分达到 <b>${JIEPAN_PASS}</b> 分后才会开放。你当前的契合分为 <b style="color:#d2664f">${score}</b> 分，时辰可能存在偏差，直接解读容易失准。请回到「定盘」页核对，或调整出生时辰重新排盘。`,
           '回到定盘校验 →', 'dingpan');
+        if (viewing) trk('jiepan_gate_block', { reason: 'low_score', score: score });
       } else {
         pane.innerHTML = jiepanGate('dingpan',
           '请先完成定盘校验',
           '命盘已生成，但还需要一步「定盘」——通过四个维度的问卷核对出生时辰是否准确。只有契合分达到 ' + JIEPAN_PASS + ' 分，才会解锁解盘，确保解读建立在正确的时辰之上。',
           '前往定盘 →', 'dingpan');
+        if (viewing) trk('jiepan_gate_block', { reason: 'no_dingpan', score: null });
       }
       bindGateBtn(pane);
       return;
@@ -1499,6 +1561,10 @@
     if (!toc) return;
     const links = Array.from(toc.querySelectorAll('a'));
     const secs = links.map((a) => document.getElementById(a.getAttribute('href').slice(1))).filter(Boolean);
+    // 埋点：目录锚点点击（看哪些板块最受关注）
+    links.forEach((a) => {
+      a.addEventListener('click', () => trk('jiepan_toc_click', { section: (a.textContent || '').trim() }));
+    });
     const onScroll = () => {
       const line = 200; // 吸顶栏下方判定线
       let cur = secs[0];
@@ -1538,6 +1604,7 @@
     btn.addEventListener('click', () => {
       const nav = btn.dataset.gnav;
       if (nav === 'paipan') {
+        trk('nav_repaipan', { from: 'jiepan_gate' });
         switchTab('paipan');
         $('formPanel').style.display = 'block';
         $('formPanel').scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -1545,6 +1612,8 @@
         switchTab('dingpan');
         window.scrollTo({ top: 0, behavior: 'smooth' });
       } else if (nav === 'dojiepan') {
+        trk('jiepan_unlock', { score: state.dpScore, from: 'jiepan_gate' });
+        trk('jiepan_generate', { score: state.dpScore });
         state.jiepan.unlocked = true;
         state.jiepan.html = buildJiepan(state.data);
         syncJiepan();
@@ -1560,6 +1629,7 @@
     const old = btn.textContent;
     btn.textContent = '生成中...';
     btn.disabled = true;
+    trk('paipan_export_img', {});
     html2canvas(target, { scale: 2, backgroundColor: '#ffffff', useCORS: true, logging: false })
       .then((canvas) => {
         const link = document.createElement('a');
