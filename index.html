@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>紫微 DS · ZWDS 玄学数据科学</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app">
+  <!-- 顶部标题栏 -->
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand">
+        <span class="brand-logo" aria-label="紫微 DS">
+          <svg viewBox="0 0 40 40" width="40" height="40" role="img">
+            <defs>
+              <linearGradient id="hmA" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0" stop-color="#7b2d8e"/><stop offset="1" stop-color="#3a1146"/>
+              </linearGradient>
+            </defs>
+            <rect x="0" y="0" width="40" height="40" rx="9" fill="url(#hmA)"/>
+            <!-- 十二宫 4x3 热力矩阵：深浅=吉凶强弱 -->
+            <g>
+              <rect x="6"  y="6"  width="6.6" height="6.6" rx="1.4" fill="#ffd75e"/>
+              <rect x="14.4" y="6"  width="6.6" height="6.6" rx="1.4" fill="#f6a23c" opacity=".9"/>
+              <rect x="22.8" y="6"  width="6.6" height="6.6" rx="1.4" fill="#ffd75e" opacity=".55"/>
+              <rect x="31.2" y="6"  width="2.8" height="6.6" rx="1.2" fill="#f6a23c" opacity=".7"/>
+              <rect x="6"  y="14.4" width="6.6" height="6.6" rx="1.4" fill="#f6a23c" opacity=".55"/>
+              <rect x="14.4" y="14.4" width="6.6" height="6.6" rx="1.4" fill="#ffd75e"/>
+              <rect x="22.8" y="14.4" width="6.6" height="6.6" rx="1.4" fill="#f6a23c" opacity=".85"/>
+              <rect x="31.2" y="14.4" width="2.8" height="6.6" rx="1.2" fill="#ffd75e" opacity=".5"/>
+              <rect x="6"  y="22.8" width="6.6" height="6.6" rx="1.4" fill="#ffd75e" opacity=".7"/>
+              <rect x="14.4" y="22.8" width="6.6" height="6.6" rx="1.4" fill="#f6a23c" opacity=".5"/>
+              <rect x="22.8" y="22.8" width="6.6" height="6.6" rx="1.4" fill="#ffd75e" opacity=".9"/>
+              <rect x="31.2" y="22.8" width="2.8" height="6.6" rx="1.2" fill="#f6a23c" opacity=".6"/>
+            </g>
+            <!-- 高光数据点：命主星 -->
+            <path d="M30 28.5l1.25 2.53 2.8.41-2.02 1.97.48 2.79-2.51-1.32-2.5 1.32.48-2.79-2.03-1.97 2.8-.41z" fill="#fff"/>
+          </svg>
+        </span>
+        <div class="brand-text">
+          <h1>紫微 DS</h1>
+          <p>ZWDS · 玄学界的数据科学</p>
+        </div>
+      </div>
+      <button id="toggleForm" class="btn-ghost" title="收起/展开输入">输入信息</button>
+    </div>
+  </header>
+
+  <!-- 输入表单 -->
+  <section id="formPanel" class="form-panel">
+    <div class="form-grid">
+      <div class="field">
+        <label>姓名 <span class="hint">(选填)</span></label>
+        <input type="text" id="name" placeholder="匿 名（可不填）" maxlength="12">
+      </div>
+
+      <div class="field">
+        <label>性别</label>
+        <div class="seg" id="genderSeg">
+          <button type="button" data-val="男" class="active">男</button>
+          <button type="button" data-val="女">女</button>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>历法</label>
+        <div class="seg" id="calSeg">
+          <button type="button" data-val="solar" class="active">阳历</button>
+          <button type="button" data-val="lunar">农历</button>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>出生日期</label>
+        <div class="date-row">
+          <input type="number" id="year" placeholder="年" min="1900" max="2100">
+          <input type="number" id="month" placeholder="月" min="1" max="12">
+          <input type="number" id="day" placeholder="日" min="1" max="31">
+        </div>
+      </div>
+
+      <div class="field" id="leapField" style="display:none;">
+        <label>闰月</label>
+        <div class="seg" id="leapSeg">
+          <button type="button" data-val="no" class="active">否</button>
+          <button type="button" data-val="yes">是</button>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>出生时辰</label>
+        <select id="timeIndex">
+          <option value="0">早子时 (00:00–00:59)</option>
+          <option value="1">丑时 (01:00–02:59)</option>
+          <option value="2">寅时 (03:00–04:59)</option>
+          <option value="3">卯时 (05:00–06:59)</option>
+          <option value="4">辰时 (07:00–08:59)</option>
+          <option value="5">巳时 (09:00–10:59)</option>
+          <option value="6">午时 (11:00–12:59)</option>
+          <option value="7">未时 (13:00–14:59)</option>
+          <option value="8">申时 (15:00–16:59)</option>
+          <option value="9" selected>酉时 (17:00–18:59)</option>
+          <option value="10">戌时 (19:00–20:59)</option>
+          <option value="11">亥时 (21:00–22:59)</option>
+          <option value="12">晚子时 (23:00–23:59)</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="form-actions">
+      <button id="paipanBtn" class="btn-primary">开始排盘</button>
+      <button id="exportBtn" class="btn-secondary" disabled>导出盘面图片</button>
+      <span id="status" class="status-msg"></span>
+    </div>
+  </section>
+
+  <!-- Tab 切换 -->
+  <nav class="tabs" id="tabs">
+    <button type="button" class="tab active" data-tab="paipan">
+      <svg class="tab-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.2"/><rect x="14" y="3" width="7" height="7" rx="1.2"/><rect x="3" y="14" width="7" height="7" rx="1.2"/><rect x="14" y="14" width="7" height="7" rx="1.2"/></svg>
+      <span>排盘</span>
+    </button>
+    <button type="button" class="tab" data-tab="dingpan">
+      <svg class="tab-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/><line x1="12" y1="1.5" x2="12" y2="4.5"/><line x1="12" y1="19.5" x2="12" y2="22.5"/><line x1="1.5" y1="12" x2="4.5" y2="12"/><line x1="19.5" y1="12" x2="22.5" y2="12"/></svg>
+      <span>定盘</span>
+    </button>
+    <button type="button" class="tab" data-tab="jiepan">
+      <svg class="tab-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6.5C10.3 5.2 7.8 4.5 5.3 4.5 4.3 4.5 3.5 4.8 3.5 5.5v12.6c0 .6.7.9 1.5.7C7 18.2 9.8 18.7 12 20.2"/><path d="M12 6.5c1.7-1.3 4.2-2 6.7-2 1 0 1.8.3 1.8 1v12.6c0 .6-.7.9-1.5.7-2-.6-4.8-.1-7 1.4"/><line x1="12" y1="6.5" x2="12" y2="20.2"/></svg>
+      <span>解盘</span>
+    </button>
+  </nav>
+
+  <!-- ============ 排盘 ============ -->
+  <section id="tab-paipan" class="tab-pane active">
+  <div id="paipanEmpty" class="pane-empty">填写上方基础信息后，点击「开始排盘」即可生成命盘。</div>
+  <!-- 结果区 -->
+  <main id="result" class="result" style="display:none;">
+    <!-- 排盘图区域 (可导出) -->
+    <div id="boardWrap" class="board-wrap">
+      <div class="board-header">
+        <span class="bh-dir bh-tl">东南方</span>
+        <span class="bh-title">南偏东</span>
+        <span class="bh-dir bh-tr">西南方</span>
+      </div>
+      <div class="board-body">
+        <span class="side-label side-left">东偏南<br>正东方<br>东偏北</span>
+        <div class="board-stage">
+          <div id="board" class="board"></div>
+          <svg id="sanfangLayer" class="sanfang-layer" aria-hidden="true"></svg>
+        </div>
+        <span class="side-label side-right">西偏南<br>正西方<br>西偏北</span>
+      </div>
+      <div class="board-footer">
+        <span class="bh-dir">东北方</span>
+        <span class="bh-title">北偏东 · 正北方 · 北偏西</span>
+        <span class="bh-dir">西北方</span>
+      </div>
+    </div>
+
+    <!-- 文字解读 -->
+    <div id="reading" class="reading"></div>
+  </main>
+  </section>
+
+  <!-- ============ 定盘 ============ -->
+  <section id="tab-dingpan" class="tab-pane">
+    <div id="dingpanEmpty" class="pane-empty">定盘需要先有命盘。请到「排盘」页填写信息并完成排盘，再回到本页进行时辰校验。</div>
+    <div id="dingpanBody" class="dingpan" style="display:none;">
+      <div class="dp-intro">
+        <h2>定盘 · 时辰校验</h2>
+        <p>出生时辰若记录有误，整张命盘都会偏移。下面这组问题从 <b>性格外貌、六亲、过往大事、福德疾厄迁移</b> 四个维度，对照本命盘逐条核验——每条先给出一个<b>明确具体的论断</b>，你只需回想自身真实情况，判断它与自己的<b>符合程度</b>。全部作答后会给出契合度评分，并判断是否值得进一步解盘预测。</p>
+      </div>
+      <div id="dpQuestions" class="dp-questions"></div>
+      <div class="dp-actions">
+        <button id="dpSubmit" class="btn-primary">提交并评分</button>
+        <button id="dpReset" class="btn-secondary">重置</button>
+        <span id="dpProgress" class="status-msg"></span>
+      </div>
+      <div id="dpResult" class="dp-result" style="display:none;"></div>
+    </div>
+  </section>
+
+  <!-- ============ 解盘 ============ -->
+  <section id="tab-jiepan" class="tab-pane">
+    <div class="jp-gate">
+      <div class="jp-gate-ico">🧭</div>
+      <h2>解盘前，请先完成排盘与定盘</h2>
+      <p>为保证解读的严谨，解盘必须建立在一张「确定且校验过」的命盘之上。请先完成排盘，再通过定盘校验出生时辰。</p>
+      <div class="jp-gate-steps">
+        <span class="step on">1 排盘</span><span class="step-arr">→</span>
+        <span class="step">2 定盘</span><span class="step-arr">→</span>
+        <span class="step">3 解盘</span>
+      </div>
+      <button class="btn-primary jp-gate-btn" data-gnav="paipan">前往排盘 →</button>
+    </div>
+  </section>
+</div>
+
+<!-- 依赖 -->
+<script src="vendor/iztro.min.js"></script>
+<script src="vendor/html2canvas.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
