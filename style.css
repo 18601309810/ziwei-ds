@@ -68,14 +68,14 @@ body {
 /* 真太阳时校正 */
 .field-full { grid-column: 1 / -1; }
 .tst-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.tst-row select#birthCity { flex: 1 1 150px; min-width: 130px; }
+.tst-row input#birthCity { flex: 1 1 150px; min-width: 130px; }
 .tst-row input#birthLng { flex: 0 1 110px; }
 .tst-row input#birthHour, .tst-row input#birthMinute { flex: 0 0 64px; }
 .tst-at { font-size: 13px; color: #777; margin-left: 4px; }
 .tst-colon { font-weight: 600; color: #777; }
 .tst-note { margin-top: 8px; padding: 8px 12px; border-radius: 7px; font-size: 12.5px; line-height: 1.6; background: #eef4fb; color: #2c5a8c; border: 1px solid #d4e3f3; }
 .tst-note.changed { background: #fdf2e9; color: #a86420; border-color: #f0d9bf; }
-@media (max-width: 560px) { .tst-row select#birthCity { flex: 1 1 100%; } }
+@media (max-width: 560px) { .tst-row input#birthCity { flex: 1 1 100%; } }
 
 .seg { display: flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
 .seg button {

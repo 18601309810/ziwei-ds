@@ -111,9 +111,8 @@
       <div class="field field-full">
         <label>真太阳时校正 <span class="hint">(选填 · 出生在时辰交界附近时更准)</span></label>
         <div class="tst-row">
-          <select id="birthCity">
-            <option value="">出生城市（选填）</option>
-          </select>
+          <input type="text" id="birthCity" list="cityList" placeholder="出生城市（可输入搜索）" autocomplete="off">
+          <datalist id="cityList"></datalist>
           <input type="number" id="birthLng" placeholder="经度°E" min="73" max="135" step="0.01" title="东经度数，可手动微调">
           <span class="tst-at">出生钟点</span>
           <input type="number" id="birthHour" placeholder="时" min="0" max="23">
