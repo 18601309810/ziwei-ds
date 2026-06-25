@@ -1654,8 +1654,15 @@
     L.push('</div>');
 
     // —— 八、大限运势走向 ——
-    L.push(sec('s8', '八', '大限运势走向', '以十年为一步，看你各阶段的运势节奏'));
+    L.push(sec('s8', '八', '大限运势走向', '先看当前十年大限与今年流年的运程聚焦，再纵览各阶段节奏'));
     L.push('<div class="jp-body">');
+    const nowFortune = buildCurrentFortune(d);
+    if (nowFortune) {
+      L.push('<div class="jp-now-wrap"><div class="jp-sub-tt">当前运程聚焦 · 大限 × 流年</div>');
+      L.push(nowFortune);
+      L.push('</div>');
+    }
+    L.push('<div class="jp-sub-tt" style="margin-top:18px">完整大限时间轴</div>');
     L.push(buildDecadalTimeline(d));
     L.push('</div>');
 
@@ -1772,6 +1779,169 @@
     });
     html += '</div>';
     return html;
+  }
+
+  // 在本命十二宫里定位某颗星所在的宫名
+  function natalPalaceOfStar(d, starName) {
+    if (!starName) return '';
+    const p = d.palaces.find((pp) => [...pp.majorStars, ...pp.minorStars, ...pp.adjectiveStars]
+      .some((s) => s.name === starName));
+    return p ? p.name : '';
+  }
+
+  // 把一组运限四化（[禄,权,科,忌] 星名数组）定位回本命宫，生成「领域 × 吉凶」提示
+  function mutagenAspects(d, mutArr) {
+    const order = ['禄', '权', '科', '忌'];
+    const items = [];
+    (mutArr || []).forEach((star, i) => {
+      if (!star) return;
+      const mut = order[i];
+      const pal = natalPalaceOfStar(d, star);
+      const field = (pal && PALACE_MEANING[pal]) ? PALACE_MEANING[pal] : '相关领域';
+      let tip;
+      if (mut === '禄') tip = `${field}方面有财禄、机会与顺遂的牵引，是这段时间最值得投入、最容易出成果的方向。`;
+      else if (mut === '权') tip = `${field}方面话语权与掌控力增强，宜主动出击、承担更大责任，但忌过于强势。`;
+      else if (mut === '科') tip = `${field}方面利名声、文书、考试与贵人相助，遇阻时也较易逢凶化吉。`;
+      else tip = `${field}方面易有阻滞、执着或耗损，是这段时间最需要耐心经营、谨慎决策、避免冲动的地方。`;
+      items.push({ mut: mut, star: star, pal: pal, tip: tip });
+    });
+    return items;
+  }
+
+  // 按四化落宫，归纳「事业/财富/感情/健康/人际家庭」几个方面的综合提示
+  function fortuneSummaryByLife(aspects) {
+    const map = {
+      '事业': ['官禄', '命宫', '迁移'],
+      '财富': ['财帛', '田宅'],
+      '感情': ['夫妻', '子女'],
+      '健康情绪': ['疾厄', '福德'],
+      '人际家庭': ['兄弟', '仆役', '交友', '父母'],
+    };
+    const out = [];
+    Object.keys(map).forEach((life) => {
+      const hit = aspects.filter((a) => map[life].includes(a.pal));
+      if (!hit.length) return;
+      const good = hit.filter((a) => a.mut !== '忌').map((a) => '化' + a.mut);
+      const bad = hit.filter((a) => a.mut === '忌').map((a) => '化' + a.mut);
+      let txt = '';
+      if (good.length && bad.length) txt = `机会与挑战并存（${good.concat(bad).join('、')}），有亮点也有需留意处，宜趋吉避凶。`;
+      else if (good.length) txt = `偏顺（${good.join('、')}），可重点把握、积极推进。`;
+      else txt = `偏谨慎（${bad.join('、')}），宜稳守、缓行，避免大动作。`;
+      out.push({ life: life, txt: txt });
+    });
+    return out;
+  }
+
+  // 当前运程聚焦：当前十年大限 + 当前流年（多维度提示）
+  function buildCurrentFortune(d) {
+    let h;
+    try {
+      if (!state.astro || typeof state.astro.horoscope !== 'function') return '';
+      h = state.astro.horoscope(new Date());
+    } catch (e) { return ''; }
+    if (!h) return '';
+
+    const age = approxAge(d);
+    const by = birthYear(d);
+    const nowYear = new Date().getFullYear();
+    const parts = [];
+
+    // —— 当前十年大限 ——
+    if (h.decadal) {
+      const dm = h.decadal;
+      const seatPal = (dm.palaceNames && dm.palaceNames[0]) || '';
+      const seatMean = (seatPal && PALACE_MEANING[seatPal]) ? PALACE_MEANING[seatPal] : '';
+      // 大限年龄/年份区间：从命盘大限信息里取与当前虚岁匹配的一段
+      let ageRange = '', yrRange = '';
+      const decs = d.palaces
+        .filter((p) => p.decadal && p.decadal.range && Array.isArray(p.decadal.range))
+        .map((p) => ({ start: p.decadal.range[0], end: p.decadal.range[1] }));
+      const cur = age ? decs.find((x) => age >= x.start && age <= x.end) : null;
+      if (cur) {
+        ageRange = `${cur.start}–${cur.end}岁`;
+        if (by) yrRange = `${by + cur.start - 1}–${by + cur.end - 1}年`;
+      }
+      const asp = mutagenAspects(d, dm.mutagen);
+      const lifeSum = fortuneSummaryByLife(asp);
+      const hasJi = asp.some((a) => a.mut === '忌');
+      const hasGood = asp.some((a) => a.mut !== '忌');
+      const tone = hasGood && !hasJi ? 'good' : (hasJi && !hasGood ? 'tough' : 'mid');
+      const toneTxt = tone === 'good' ? '整体偏顺' : (tone === 'tough' ? '宜守为主' : '机会与挑战并存');
+
+      let html = `<div class="jp-fortune jp-f-${tone}">`;
+      html += `<div class="jp-f-head"><span class="jp-f-badge">大限</span><span class="jp-f-range">${ageRange || '当前十年'}${yrRange ? ' · ' + yrRange : ''}</span><span class="jp-f-tone t-${tone}">${toneTxt}</span></div>`;
+      if (seatPal) html += `<p class="jp-f-lead">这十年大限的命宫，坐落在你本命的 <b>${/宫$/.test(seatPal) ? seatPal : seatPal + '宫'}</b>${seatMean ? `（${seatMean}）` : ''}——这是本阶段的人生主轴所在。</p>`;
+      if (asp.length) {
+        html += '<div class="jp-f-muts">';
+        asp.forEach((a) => {
+          html += `<div class="jp-f-mut m-${a.mut}">${mutBadge(a.mut)} <b>${a.star}</b> 化${a.mut} 落 <span class="pal-hl">${a.pal ? (/宫$/.test(a.pal) ? a.pal : a.pal + '宫') : '运盘'}</span>：${a.tip}</div>`;
+        });
+        html += '</div>';
+      }
+      if (lifeSum.length) {
+        html += '<div class="jp-f-life">';
+        lifeSum.forEach((s) => { html += `<div class="jp-f-life-item"><span class="jp-f-life-k">${s.life}</span><span class="jp-f-life-v">${s.txt}</span></div>`; });
+        html += '</div>';
+      }
+      html += '</div>';
+      parts.push(html);
+    }
+
+    // —— 当前流年 ——
+    if (h.yearly) {
+      const ym = h.yearly;
+      const seatPal = (ym.palaceNames && ym.palaceNames[0]) || '';
+      const seatMean = (seatPal && PALACE_MEANING[seatPal]) ? PALACE_MEANING[seatPal] : '';
+      const asp = mutagenAspects(d, ym.mutagen);
+      const lifeSum = fortuneSummaryByLife(asp);
+      const hasJi = asp.some((a) => a.mut === '忌');
+      const hasGood = asp.some((a) => a.mut !== '忌');
+      const tone = hasGood && !hasJi ? 'good' : (hasJi && !hasGood ? 'tough' : 'mid');
+      const toneTxt = tone === 'good' ? '整体偏顺' : (tone === 'tough' ? '宜守为主' : '机会与挑战并存');
+
+      // 流年吉星/煞星落宫
+      const luckyNames = ['流昌', '流曲', '流魁', '流钺', '流禄', '流马', '流鸾', '流喜'];
+      const harshNames = ['流羊', '流陀'];
+      const lucky = [], harsh = [];
+      if (Array.isArray(ym.stars) && ym.palaceNames) {
+        ym.stars.forEach((arr, i) => {
+          (arr || []).forEach((s) => {
+            const seg = { '流禄': '财禄', '流昌': '文昌利学业文书', '流曲': '才艺口才', '流魁': '贵人(长辈/男性)', '流钺': '贵人(平辈/女性)', '流马': '走动变迁', '流鸾': '桃花姻缘', '流喜': '喜庆添丁', '流羊': '冲突意外、宜防破财口舌', '流陀': '拖延纠缠、宜防暗损' };
+            const where = ym.palaceNames[i];
+            if (luckyNames.includes(s.name)) lucky.push(`${seg[s.name] || s.name}（落${where}）`);
+            else if (harshNames.includes(s.name)) harsh.push(`${seg[s.name] || s.name}（落${where}）`);
+          });
+        });
+      }
+
+      let html = `<div class="jp-fortune jp-f-${tone}">`;
+      html += `<div class="jp-f-head"><span class="jp-f-badge year">流年</span><span class="jp-f-range">${nowYear}年${age ? ' · 虚岁约' + age : ''}</span><span class="jp-f-tone t-${tone}">${toneTxt}</span></div>`;
+      if (seatPal) html += `<p class="jp-f-lead">今年的流年命宫，落在你本命的 <b>${/宫$/.test(seatPal) ? seatPal : seatPal + '宫'}</b>${seatMean ? `（${seatMean}）` : ''}——这是今年运势的重心。</p>`;
+      if (asp.length) {
+        html += '<div class="jp-f-muts">';
+        asp.forEach((a) => {
+          html += `<div class="jp-f-mut m-${a.mut}">${mutBadge(a.mut)} <b>${a.star}</b> 化${a.mut} 落 <span class="pal-hl">${a.pal ? (/宫$/.test(a.pal) ? a.pal : a.pal + '宫') : '运盘'}</span>：${a.tip}</div>`;
+        });
+        html += '</div>';
+      }
+      if (lucky.length || harsh.length) {
+        html += '<div class="jp-f-stars">';
+        if (lucky.length) html += `<div class="jp-f-star good"><b>今年助力：</b>${lucky.join('；')}。</div>`;
+        if (harsh.length) html += `<div class="jp-f-star bad"><b>今年留意：</b>${harsh.join('；')}。</div>`;
+        html += '</div>';
+      }
+      if (lifeSum.length) {
+        html += '<div class="jp-f-life">';
+        lifeSum.forEach((s) => { html += `<div class="jp-f-life-item"><span class="jp-f-life-k">${s.life}</span><span class="jp-f-life-v">${s.txt}</span></div>`; });
+        html += '</div>';
+      }
+      html += '</div>';
+      parts.push(html);
+    }
+
+    if (!parts.length) return '';
+    parts.push('<p class="jp-f-foot">说明：以上为当前大限与流年的运程聚焦，依「运限四化落本命宫」与「流年吉煞星落宫」推演，供把握当下节奏参考；运限层层叠加，临界年份建议结合流月细看。</p>');
+    return parts.join('\n');
   }
 
   // 综合建议（扬长避短）
