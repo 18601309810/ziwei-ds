@@ -67,6 +67,8 @@
     gender: '男', cal: 'solar', leap: 'no', astro: null, data: null,
     dpScale: '3', dpQuestions: [], dpAnswers: {},
     dpScore: null,                       // 最近一次定盘契合分
+    dpDetail: null,                      // 最近一次定盘四维分项明细
+    tst: { used: false },                // 真太阳时换算详情
     jiepan: { unlocked: false, html: '' }, // 解盘解锁状态与已生成内容
   };
   const JIEPAN_PASS = 70;                 // 解盘解锁所需契合分
@@ -411,6 +413,23 @@
     const tstClock = ($('birthHour') && $('birthHour').value !== '')
       ? (($('birthHour').value || '') + ':' + ($('birthMinute').value || '00')) : '';
     const tstUsed = !isNaN(tstLng) && tstClock !== '';
+
+    // 记录真太阳时换算详情，供解盘 Part1 展示
+    if (tstUsed) {
+      const _ch = parseInt($('birthHour').value, 10);
+      const _cm = $('birthMinute').value === '' ? 0 : parseInt($('birthMinute').value, 10);
+      const _r = trueSolarHour(tstLng, _ch, isNaN(_cm) ? 0 : _cm, m, d);
+      const _mm = (x) => (x < 10 ? '0' + x : '' + x);
+      state.tst = {
+        used: true, city: tstCity, lng: tstLng,
+        clock: `${_mm(_ch)}:${_mm(isNaN(_cm) ? 0 : _cm)}`,
+        solar: `${_mm(_r.hour)}:${_mm(_r.minute)}`,
+        delta: Math.round(_r.deltaMin),
+        timeName: (TIME_LABELS[hourToTimeIndex(_r.hour)] || ''),
+      };
+    } else {
+      state.tst = { used: false };
+    }
 
     // 埋点：排盘提交（明文上报完整输入信息）
     trk('paipan_submit', {
@@ -1233,6 +1252,7 @@
     }
     const result = computeDpScore();
     state.dpScore = result.overall;
+    state.dpDetail = result.dimScore || null;   // 供解盘 Part1「定盘校验结果」展示
     // 埋点：定盘提交（点击「提交」即带上评分结果与四维分项）
     (function () {
       var ds = result.dimScore || {};
@@ -1509,19 +1529,319 @@
     return ms.filter((n) => map[n]).map((n) => ({ star: n, text: map[n] }));
   }
 
+  // ===== 飞星四化（命宫干 / 各宫干四化 + 自化）=====
+  // 十天干四化表（禄/权/科/忌 对应的星名，中文）——经 iztro mutagedPlaces() 实测校验一致
+  const STEM_MUTAGEN = {
+    '甲': ['廉贞', '破军', '武曲', '太阳'], '乙': ['天机', '天梁', '紫微', '太阴'],
+    '丙': ['天同', '天机', '文昌', '廉贞'], '丁': ['太阴', '天同', '天机', '巨门'],
+    '戊': ['贪狼', '太阴', '右弼', '天机'], '己': ['武曲', '贪狼', '天梁', '文曲'],
+    '庚': ['太阳', '武曲', '太阴', '天同'], '辛': ['巨门', '太阳', '文曲', '文昌'],
+    '壬': ['天梁', '紫微', '左辅', '武曲'], '癸': ['破军', '巨门', '太阴', '贪狼'],
+  };
+  const MUT_ORDER = ['禄', '权', '科', '忌'];
+
+  // 某宫天干的四化「飞入」哪些本命宫（飞星）
+  function flyMutagen(d, palName) {
+    const p = findPalace(d, palName);
+    if (!p) return [];
+    const stars = STEM_MUTAGEN[p.heavenlyStem];
+    if (!stars) return [];
+    return stars.map((star, i) => ({
+      mut: MUT_ORDER[i], star, to: natalPalaceOfStar(d, star), stem: p.heavenlyStem,
+    }));
+  }
+  // 某宫的「自化」：该宫天干引动的四化星，恰好就坐落在本宫
+  function selfMutagen(d, palName) {
+    const p = findPalace(d, palName);
+    if (!p) return [];
+    const stars = STEM_MUTAGEN[p.heavenlyStem];
+    if (!stars) return [];
+    const here = new Set([...p.majorStars, ...p.minorStars, ...p.adjectiveStars].map((s) => s.name));
+    const r = [];
+    stars.forEach((star, i) => { if (here.has(star)) r.push({ mut: MUT_ORDER[i], star }); });
+    return r;
+  }
+
+  // 主星庙旺落陷 -> 简评（结合亮度）
+  function brightnessNote(b) {
+    if (['庙', '旺'].includes(b)) return { tone: 'good', txt: '庙旺得地，力量充分发挥，吉者更吉' };
+    if (['得', '利'].includes(b)) return { tone: 'mid', txt: '得地有力，发挥尚佳' };
+    if (b === '平') return { tone: 'mid', txt: '平和，力量中平' };
+    if (['不', '陷'].includes(b)) return { tone: 'tough', txt: '落陷失辉，力量受限，需后天补强' };
+    return { tone: 'mid', txt: '力量中平' };
+  }
+
+  // 一颗主星的庙旺信息（在某宫里找）
+  function starBrightness(d, palName, starName) {
+    const p = findPalace(d, palName);
+    if (!p) return '';
+    const s = p.majorStars.find((x) => x.name === starName);
+    return s ? (s.brightness || '') : '';
+  }
+
+  // 取某宫的辅星/煞星分类
+  const LUCKY_AUX = ['左辅', '右弼', '天魁', '天钺', '文昌', '文曲', '禄存', '天马'];
+  const HARSH_AUX = ['擎羊', '陀罗', '火星', '铃星', '地空', '地劫', '天空'];
+  function palaceAux(d, palName) {
+    const p = findPalace(d, palName);
+    if (!p) return { lucky: [], harsh: [], other: [] };
+    const all = [...p.minorStars, ...p.adjectiveStars].map((s) => s.name);
+    return {
+      lucky: all.filter((n) => LUCKY_AUX.includes(n)),
+      harsh: all.filter((n) => HARSH_AUX.includes(n)),
+      other: all.filter((n) => !LUCKY_AUX.includes(n) && !HARSH_AUX.includes(n)),
+    };
+  }
+
+  // 增强版格局判定：返回 { name, type:'成格'|'破格'|'', desc } 数组
+  function detectPatterns(d) {
+    const soul = findPalace(d, '命宫');
+    const ms = new Set(majorNames(soul));
+    const out = [];
+    const has = (n) => ms.has(n);
+    // 三方四正主星集合（用于杀破狼/机月同梁/紫府等结构判断）
+    const triadStars = new Set();
+    ['命宫', '迁移', '财帛', '官禄'].forEach((pn) => {
+      const p = findPalace(d, pn);
+      if (p) majorNames(p).forEach((n) => triadStars.add(n));
+    });
+    const tHas = (n) => triadStars.has(n);
+
+    // 杀破狼
+    if (tHas('七杀') || tHas('破军') || tHas('贪狼')) {
+      out.push({ name: '杀破狼格', type: '主格', desc: '命格三方四正见七杀、破军、贪狼，人生主轴在「变动与开创」——一生起伏较大、不安于现状，宜化冲劲为革新动力，最忌求稳守成。适合开创、业务、专业技术或自主奋斗的路。' });
+    }
+    // 机月同梁
+    if (tHas('天机') && tHas('太阴') && tHas('天同') && tHas('天梁')) {
+      out.push({ name: '机月同梁格', type: '主格', desc: '三方四正见天机、太阴、天同、天梁，主稳定、规律、智慧型的人生节奏——适合公职、行政、企划、文教、专业服务等「安稳上班 / 专业立身」的路，忌大起大落的投机冒险。' });
+    }
+    // 紫府
+    if (has('紫微') && has('天府')) out.push({ name: '紫府同宫格', type: '成格', desc: '帝星紫微与财库天府同坐命宫，主稳重大器、兼具领导与守成之才，格局厚重，宜往管理、统筹、掌握资源的方向发展。' });
+    else if (tHas('紫微') && tHas('天府')) out.push({ name: '紫府朝垣格', type: '成格', desc: '紫微、天府于三方四正拱照命宫，主一生有贵气与资源助力，行事稳健、能聚财掌权。' });
+    // 日月
+    if (has('太阳') && has('太阴')) out.push({ name: '日月同宫格', type: '成格', desc: '太阳太阴同临，主才华横溢、内外兼修、阴阳调和，情感与理智兼备，唯情绪起伏需调适。' });
+    // 武贪
+    if (has('武曲') && has('贪狼')) out.push({ name: '武贪格', type: '成格', desc: '武曲贪狼同宫，主「先勤后发、中晚年发达」，宜专业实干兼把握机遇，年轻时多积累、忌操之过急。' });
+    // 机梁
+    if (has('天机') && has('天梁')) out.push({ name: '机梁格', type: '成格', desc: '天机天梁同临，长于谋略、参谋、分析与化解，是智慧型、顾问型的命格，适合宗教哲学、策划、监察。' });
+    // 君臣庆会（紫微 + 辅弼/昌曲魁钺）
+    const soulAux = palaceAux(d, '命宫');
+    if ((has('紫微') || has('天府')) && (soulAux.lucky.includes('左辅') || soulAux.lucky.includes('右弼') || soulAux.lucky.includes('文昌') || soulAux.lucky.includes('文曲'))) {
+      out.push({ name: '君臣庆会', type: '成格', desc: '主星得左辅右弼或文昌文曲等吉星扶持，主有得力助手与贵人相随，事业易成气候。' });
+    }
+    // 破格信号：命宫见煞或主星落陷
+    if (soulAux.harsh.length) {
+      out.push({ name: '命宫见煞', type: '破格', desc: `命宫会照 ${soulAux.harsh.join('、')} 等煞曜，主性格或人生带有磨练与冲击，吉星力量打折扣，需以耐心与修养化解，化煞为用反能成就坚韧。` });
+    }
+    if (!majorNames(soul).length) {
+      out.push({ name: '命无正曜', type: '', desc: '命宫无主星，借对宫迁移宫之星论命，格局灵活、可塑性高，性格易受环境影响，宜后天主动立定方向，反而海阔天空。' });
+    }
+    return out;
+  }
+
+  // 全盘吉凶总基调（综合三方四正四化与吉煞）
+  function overallTone(d) {
+    let score = 0;
+    ['命宫', '迁移', '财帛', '官禄'].forEach((pn) => {
+      const p = findPalace(d, pn);
+      if (!p) return;
+      [...p.majorStars, ...p.minorStars].forEach((s) => {
+        if (s.mutagen === '禄' || s.mutagen === '权' || s.mutagen === '科') score += 1;
+        if (s.mutagen === '忌') score -= 1.2;
+        if (['庙', '旺'].includes(s.brightness)) score += 0.4;
+        if (['陷', '不'].includes(s.brightness)) score -= 0.4;
+      });
+      const aux = palaceAux(d, pn);
+      score += aux.lucky.length * 0.5;
+      score -= aux.harsh.length * 0.5;
+    });
+    if (score >= 4) return { word: '吉多于凶 · 格局向上', txt: '全盘吉星与助力较多，整体基调偏向顺遂上行，宜积极进取、把握机会。' };
+    if (score >= 1.5) return { word: '吉凶参半偏吉', txt: '全盘有亮点也有需经营之处，整体中上，趋吉避凶、扬长补短即可走得稳健。' };
+    if (score >= -0.5) return { word: '平稳务实', txt: '全盘格局平和，无大吉亦无大凶，人生靠踏实积累、稳中求进。' };
+    return { word: '挑战较多 · 宜守', txt: '全盘煞忌或落陷较多，人生磨练偏多，宜稳健保守、修身养性，以耐心化解，后天努力可明显改善先天。' };
+  }
+
+  // 生年四化按 禄权科忌 归类：{ '禄':[{star,palace}], ... }
+  function mutByType(d) {
+    const out = { '禄': [], '权': [], '科': [], '忌': [] };
+    d.palaces.forEach((p) => {
+      [...p.majorStars, ...p.minorStars].forEach((s) => {
+        if (s.mutagen && out[s.mutagen]) out[s.mutagen].push({ star: s.name, palace: p.name });
+      });
+    });
+    return out;
+  }
+
+  // 飞化「飞入某宫」的事件含义
+  function flyEventNote(mut, toPal) {
+    const field = PALACE_MEANING[toPal] || '相关领域';
+    if (mut === '禄') return `为「${field}」带来助益、善缘与进益，是这股能量主动施惠的方向`;
+    if (mut === '权') return `把掌控力与心力投注在「${field}」，主对其强势介入、积极经营`;
+    if (mut === '科') return `为「${field}」带来名声、文书、贵人与逢凶化吉之力`;
+    const opp = OPP_PALACE[toPal] || '';
+    return `对「${field}」有放不下的牵挂、执着或耗损${opp ? `，且回冲${opp}宫，连带影响该宫人事` : ''}`;
+  }
+
+  // 把宫位 → 人生事件标签（用于流年预判）
+  function palaceLifeTag(mut, pal) {
+    const m = {
+      '官禄': mut === '忌' ? '事业易变动/受阻' : '事业升迁·学业有成',
+      '财帛': mut === '忌' ? '注意破财/投资亏损' : '进财机会·财运活络',
+      '田宅': mut === '忌' ? '家宅变动/置产破耗' : '置产·家宅添喜',
+      '夫妻': mut === '忌' ? '感情易生波折' : '感情升温·婚恋喜事',
+      '子女': mut === '忌' ? '亲子/合伙需留意' : '添丁·桃花·创作丰收',
+      '疾厄': mut === '忌' ? '健康亮黄灯·防伤病' : '体能调养见效',
+      '福德': mut === '忌' ? '精神压力大·防焦虑' : '心境开阔·福分增长',
+      '迁移': mut === '忌' ? '在外奔波·防意外' : '外出·搬迁·拓展有利',
+      '命宫': mut === '忌' ? '自我调整·重要抉择' : '人生上台阶·能力跃升',
+      '父母': mut === '忌' ? '留意长辈健康/文书' : '得长辈上司提携',
+      '兄弟': mut === '忌' ? '平辈合作防摩擦' : '手足朋友得助力',
+      '仆役': mut === '忌' ? '人际是非·防小人' : '人脉拓展·贵人多',
+      '交友': mut === '忌' ? '人际是非·防小人' : '人脉拓展·贵人多',
+    };
+    return m[pal] || (mut === '忌' ? '相关领域需留意' : '相关领域有进展');
+  }
+
+  // —— Part 4 子构建：四化飞星·全盘因果逻辑 ——
+  function buildFlyingStar(d) {
+    const H = [];
+    const mt = mutByType(d);
+
+    // 4.1 生年四化全局解读
+    H.push('<div class="jp-sub-tt">4.1　生年四化 · 先天定数</div>');
+    H.push('<p class="jp-lead-sm">生年四化由你的<b>出生年天干</b>决定，是与生俱来、贯穿一生的能量主轴——禄权科是天赋助力，忌是必修功课。</p>');
+    H.push('<div class="jp-mut-grid">');
+    MUT_ORDER.forEach((mut) => {
+      const arr = mt[mut];
+      H.push(`<div class="jp-mut-col m-${mut}"><div class="jp-mut-col-h">${mutBadge(mut)} 化${mut}<em>${MUT_MEANING[mut]}</em></div>`);
+      if (arr.length) {
+        arr.forEach((x) => {
+          const field = PALACE_MEANING[x.palace] || '';
+          H.push(`<div class="jp-mut-row"><b>${x.star}</b> 落 <span class="pal-hl">${x.palace}宫</span>${field ? `<span class="jp-mut-field">${field}</span>` : ''}</div>`);
+        });
+      } else {
+        H.push('<div class="jp-mut-row empty">本盘无此化</div>');
+      }
+      H.push('</div>');
+    });
+    H.push('</div>');
+    if (mt['忌'].length) {
+      H.push(`<p class="jp-warn">⚠ 你的生年化忌为 <b>${mt['忌'].map((x) => x.star + '化忌落' + x.palace + '宫').join('、')}</b>——这是此生最需要用心经营、不可回避的核心课题，遇到相关领域宜多一分谨慎与耐心。</p>`);
+    }
+
+    // 4.2 命宫干四化（后天人为选择）
+    H.push('<div class="jp-sub-tt" style="margin-top:20px">4.2　命宫干四化 · 后天选择</div>');
+    H.push('<p class="jp-lead-sm">命宫天干引动的四化「飞入」哪些宫位，代表<b>你主动用心、亲手促成</b>的人生因果——这是后天选择的方向。</p>');
+    const soulFly = flyMutagen(d, '命宫');
+    if (soulFly.length) {
+      H.push('<ul class="jp-list">');
+      soulFly.forEach((f) => {
+        if (!f.to) return;
+        H.push(`<li>${mutBadge(f.mut)} 命宫（${f.stem}干）引 <b>${f.star}</b> 化${f.mut} 飞入 <span class="pal-hl">${f.to}宫</span>——你${flyEventNote(f.mut, f.to)}。</li>`);
+      });
+      H.push('</ul>');
+    } else {
+      H.push('<p class="jp-note">命宫干四化信息从略。</p>');
+    }
+
+    // 4.3 重点宫位飞化联动
+    H.push('<div class="jp-sub-tt" style="margin-top:20px">4.3　重点宫位飞化联动 · 因果链</div>');
+    H.push('<p class="jp-lead-sm">财帛、官禄、夫妻、田宅四大现实宫位的天干飞化，揭示「钱、事业、感情、家业」之间牵一发动全身的因果联动。</p>');
+    const keyPals = [['财帛', '钱财'], ['官禄', '事业'], ['夫妻', '婚姻'], ['田宅', '家业']];
+    const linkRows = [];
+    keyPals.forEach(([pn, label]) => {
+      const flies = flyMutagen(d, pn);
+      const lu = flies.find((f) => f.mut === '禄' && f.to);
+      const ji = flies.find((f) => f.mut === '忌' && f.to);
+      const segs = [];
+      if (lu) segs.push(`化禄飞入<span class="pal-hl">${lu.to}宫</span>（${lu.star}）——你的${label}能为「${PALACE_MEANING[lu.to] || lu.to}」带来助力`);
+      if (ji) {
+        const opp = OPP_PALACE[ji.to] || '';
+        segs.push(`化忌飞入<span class="pal-hl">${ji.to}宫</span>（${ji.star}）——${label}牵动「${PALACE_MEANING[ji.to] || ji.to}」的耗损${opp ? `，并冲${opp}宫` : ''}`);
+      }
+      if (segs.length) linkRows.push(`<li><b>${pn}宫</b>：${segs.join('；')}。</li>`);
+    });
+    if (linkRows.length) { H.push('<ul class="jp-list">' + linkRows.join('') + '</ul>'); }
+    else H.push('<p class="jp-note">重点宫位未见显著飞化联动。</p>');
+
+    // 4.4 自化标记（风险点单独标注）
+    H.push('<div class="jp-sub-tt" style="margin-top:20px">4.4　自化标记 · 隐性风险点</div>');
+    H.push('<p class="jp-lead-sm">「自化」指某宫天干引动的四化星，恰好坐在<b>本宫自己</b>——能量自我消耗、不假外求，常是命盘里容易被忽略的隐性破口。</p>');
+    const selfRows = [];
+    d.palaces.forEach((p) => {
+      const sm = selfMutagen(d, p.name);
+      sm.forEach((s) => {
+        let risk;
+        if (s.mut === '禄') risk = '自化禄：看似顺遂、易得意忘形，福分容易在不知不觉中流失，属「虚假利好」，宜惜福收敛';
+        else if (s.mut === '忌') risk = '自化忌：自我内耗、钻牛角尖，无外力即自损，是该宫最需警惕的内在破口';
+        else if (s.mut === '权') risk = '自化权：自我膨胀、过度逞强，宜收敛锋芒、避免独断';
+        else risk = '自化科：自我标榜、好名重面子，宜务实低调';
+        selfRows.push(`<li>${mutBadge(s.mut)} <span class="pal-hl">${p.name}宫</span> <b>${s.star}</b> 自化${s.mut}——${risk}。</li>`);
+      });
+    });
+    if (selfRows.length) { H.push('<ul class="jp-list jp-self">' + selfRows.join('') + '</ul>'); }
+    else H.push('<p class="jp-good">✦ 本盘各宫未见明显自化，能量较少自我空耗，是难得的稳定结构。</p>');
+
+    return H.join('\n');
+  }
+
+  // —— Part 5 子构建：近10年重点流年预判 ——
+  function buildYearlyForecast(d) {
+    if (!state.astro || typeof state.astro.horoscope !== 'function') return '';
+    const nowYear = new Date().getFullYear();
+    const by = birthYear(d);
+    const rows = [];
+    for (let i = 0; i < 10; i++) {
+      const yr = nowYear + i;
+      let h;
+      try { h = state.astro.horoscope(new Date(yr, 6, 1)); } catch (e) { continue; }
+      if (!h || !h.yearly) continue;
+      const ym = h.yearly;
+      const seatPal = (ym.palaceNames && ym.palaceNames[0]) || '';
+      const asp = mutagenAspects(d, ym.mutagen);
+      const ji = asp.find((a) => a.mut === '忌');
+      const lu = asp.find((a) => a.mut === '禄');
+      const quan = asp.find((a) => a.mut === '权');
+      const tags = [];
+      if (lu && lu.pal) tags.push({ t: 'good', x: palaceLifeTag('禄', lu.pal) });
+      if (quan && quan.pal && (!lu || quan.pal !== lu.pal)) tags.push({ t: 'good', x: palaceLifeTag('权', quan.pal) });
+      if (ji && ji.pal) tags.push({ t: 'bad', x: palaceLifeTag('忌', ji.pal) });
+      const tone = (ji && !lu) ? 'tough' : ((lu && !ji) ? 'good' : 'mid');
+      const xu = by ? (yr - by + 1) : null;
+      rows.push(`<div class="jp-yf-row ${tone}">
+        <div class="jp-yf-yr">${yr}<span>${xu ? '虚岁' + xu : ''}</span></div>
+        <div class="jp-yf-body">
+          <div class="jp-yf-seat">流年命宫落本命 <b>${seatPal ? (/宫$/.test(seatPal) ? seatPal : seatPal + '宫') : '—'}</b></div>
+          <div class="jp-yf-tags">${tags.length ? tags.map((g) => `<span class="jp-yf-tag ${g.t}">${g.x}</span>`).join('') : '<span class="jp-yf-tag mid">平顺无大起伏</span>'}</div>
+        </div>
+      </div>`);
+    }
+    if (!rows.length) return '';
+    return '<div class="jp-yf">' + rows.join('') + '</div>';
+  }
+
   function buildJiepan(d) {
     const L = [];
     const soul = findPalace(d, '命宫');
     const soulMs = pMajors(d, '命宫');
-    const borrowed = !majorNames(soul).length;
+    const soulOwn = majorNames(soul);
+    const borrowed = !soulOwn.length;
+    const mt = mutByType(d);
+    const mutFound = [];
+    d.palaces.forEach((p) => {
+      [...p.majorStars, ...p.minorStars].forEach((s) => { if (s.mutagen) mutFound.push({ star: s.name, mut: s.mutagen, palace: p.name }); });
+    });
+    const patterns = detectPatterns(d);
+    const tone = overallTone(d);
 
     // —— 顶部定调卡 ——
     const tagPool = [];
     soulMs.forEach((n) => { if (STAR_TAGS[n]) tagPool.push(...STAR_TAGS[n]); });
     const tags = Array.from(new Set(tagPool)).slice(0, 6);
+    const mainPat = patterns.find((p) => p.type === '主格') || patterns.find((p) => p.type === '成格');
     const oneLine = soulMs.length
-      ? `命宫坐 <b>${soulMs.join('、')}</b>，${borrowed ? '（借对宫论）' : ''}是一张${gradeWord(d)}的命盘。`
-      : '命宫格局以对宫与三方借力为主。';
+      ? `命宫坐 <b>${soulMs.join('、')}</b>${borrowed ? '（命宫无主星，借对宫迁移宫论）' : ''}${mainPat ? `，属<b>${mainPat.name}</b>` : ''}，全盘基调「${tone.word}」。`
+      : '命宫格局以对宫与三方借力为主，可塑性高。';
     L.push(`<div class="jp-hero">
       <div class="jp-hero-top">
         <span class="jp-hero-name">${d.name}</span>
@@ -1532,168 +1852,275 @@
       <div class="jp-hero-base">命主星 <b>${d.soul}</b> · 身主星 <b>${d.body}</b> · 命宫${d.soulBranch} · 身宫${d.bodyBranch} · ${d.solarDate} ${d.time}</div>
     </div>`);
 
-    // 目录导航
+    // 目录导航（六部分）
     const toc = [
-      ['s1', '命格总论'], ['s2', '性格与心性'], ['s3', '事业与方向'],
-      ['s4', '财富格局'], ['s5', '感情婚姻'], ['s6', '六亲家庭'],
-      ['s7', '健康提醒'], ['s8', '大限运势走向'], ['s9', '先天四化'], ['s10', '综合建议'],
+      ['s1', '一·基础档案'], ['s2', '二·先天内核'], ['s3', '三·人事拆解'],
+      ['s4', '四·四化飞星'], ['s5', '五·时限运势'], ['s6', '六·综合总结'],
     ];
     L.push(`<nav class="jp-toc">${toc.map(([id, t]) => `<a href="#${id}">${t}</a>`).join('')}</nav>`);
 
-    // —— 一、命格总论 ——
-    L.push(sec('s1', '一', '命格总论', '从命宫主星与五行局看你这一生的「底色」'));
+    // ============ 第一部分：命盘基础档案 ============
+    L.push(sec('s1', '一', '命盘基础档案', '出生信息、定盘校验与全局格局总评，先把「这张盘」交代清楚'));
     L.push('<div class="jp-body">');
+
+    // 1.1 个人出生信息 + 真太阳时
+    L.push('<div class="jp-sub-tt">1.1　出生信息与定盘</div>');
+    L.push(`<div class="jp-archive">
+      <div class="jp-arc-row"><span class="k">姓名</span><span>${d.name}</span></div>
+      <div class="jp-arc-row"><span class="k">性别 / 生肖</span><span>${d.gender}命 · 属${d.zodiac} · ${d.sign}</span></div>
+      <div class="jp-arc-row"><span class="k">阳历</span><span>${d.solarDate} ${d.time}</span></div>
+      <div class="jp-arc-row"><span class="k">农历</span><span>${d.lunarDate}</span></div>
+      <div class="jp-arc-row"><span class="k">八字四柱</span><span>${d.chineseDate}</span></div>
+      <div class="jp-arc-row"><span class="k">命宫 / 身宫</span><span>命宫坐${d.soulBranch} · 身宫坐${d.bodyBranch}</span></div>
+    </div>`);
+    // 真太阳时换算说明
+    if (state.tst && state.tst.used) {
+      const t = state.tst;
+      const dir = t.delta >= 0 ? '晚' : '早';
+      L.push(`<p class="jp-note"><b>真太阳时换算：</b>出生地 <b>${t.city || '（按经度）'}</b>（约东经${t.lng}°），钟表时间 ${t.clock} 经经度时差与均时差校正后，真太阳时约为 <b>${t.solar}</b>（比北京时间${dir}约 ${Math.abs(t.delta)} 分钟），据此定为 <b>${t.timeName || ''}</b> 起盘——时辰交界处的盘面因此更精准。</p>`);
+    } else {
+      L.push('<p class="jp-note"><b>真太阳时换算：</b>本次未启用出生地校正，直接按所填钟表时辰起盘。若你出生在时辰交界附近，建议回到排盘补填出生地点以提高精度。</p>');
+    }
+    // 定盘校验结果
+    if (state.dpScore != null) {
+      const dimLabel = { d1: '性格外貌', d2: '六亲缘分', d3: '大限往事', d4: '内在际遇' };
+      const dd = state.dpDetail || {};
+      const passed = state.dpScore >= JIEPAN_PASS;
+      L.push(`<div class="jp-dp-verify ${passed ? 'pass' : 'low'}">
+        <div class="jp-dp-v-h"><span>定盘契合度校验</span><b>${state.dpScore} 分</b><em>${passed ? '盘面可信 ✓' : '契合偏低，仅供参考'}</em></div>
+        <div class="jp-dp-v-dims">`);
+      ['d1', 'd2', 'd3', 'd4'].forEach((dim) => {
+        const o = dd[dim];
+        const pct = (o && o.pct != null) ? Math.round(o.pct) : null;
+        L.push(`<div class="jp-dp-v-dim"><span class="lbl">${dimLabel[dim]}</span><span class="bar"><i style="width:${pct == null ? 0 : pct}%;background:${scoreColor(pct == null ? 0 : pct)}"></i></span><span class="val">${pct == null ? '—' : pct}</span></div>`);
+      });
+      L.push('</div></div>');
+    } else {
+      L.push('<p class="jp-note">（尚未完成定盘校验。解盘结论的可信度以定盘契合度为前提，建议先完成定盘。）</p>');
+    }
+
+    // 1.2 盘核心参数
+    L.push('<div class="jp-sub-tt" style="margin-top:18px">1.2　命盘核心参数</div>');
+    if (ELEM_NOTE[d.fiveElementsClass]) {
+      L.push(`<p><b>五行局：</b><span class="star-hl">${d.fiveElementsClass}</span>——${ELEM_NOTE[d.fiveElementsClass]}。命主星 <b>${d.soul}</b>（主先天禀赋与人生走向），身主星 <b>${d.body}</b>（主后天努力与中晚年依归）。</p>`);
+    }
+    // 生年四化禄权科忌落宫一览
+    L.push('<p><b>生年四化落宫：</b></p><ul class="jp-list jp-mut-line">');
+    MUT_ORDER.forEach((mut) => {
+      const arr = mt[mut];
+      L.push(`<li>${mutBadge(mut)} 化${mut}：${arr.length ? arr.map((x) => `${x.star}落${x.palace}宫`).join('、') : '本盘无'}</li>`);
+    });
+    L.push('</ul>');
+
+    // 1.3 全局格局总评
+    L.push('<div class="jp-sub-tt" style="margin-top:18px">1.3　全局格局总评</div>');
+    if (patterns.length) {
+      L.push('<div class="jp-pat-list">');
+      patterns.forEach((p) => {
+        const cls = p.type === '破格' ? 'pat-bad' : (p.type === '主格' ? 'pat-main' : (p.type === '成格' ? 'pat-good' : 'pat-mid'));
+        L.push(`<div class="jp-pat ${cls}"><div class="jp-pat-h"><span class="jp-pat-name">${p.name}</span>${p.type ? `<span class="jp-pat-tag">${p.type}</span>` : ''}</div><div class="jp-pat-desc">${p.desc}</div></div>`);
+      });
+      L.push('</div>');
+    } else {
+      L.push('<p>本盘格局平实，无特殊成格或破格，人生靠踏实积累。</p>');
+    }
+    L.push(`<div class="jp-tone jp-tone-${tone.word.includes('挑战') ? 'tough' : (tone.word.includes('向上') ? 'good' : 'mid')}"><span class="jp-tone-word">${tone.word}</span><span class="jp-tone-txt">${tone.txt}</span></div>`);
+    L.push('</div>');
+
+    // ============ 第二部分：先天内核·自我全貌 ============
+    L.push(sec('s2', '二', '先天内核 · 自我全貌', '命宫立身、身宫归依、福德主精神、疾厄定体质——这是先天的「你」'));
+    L.push('<div class="jp-body">');
+
+    // 2.1 命宫详解 + 三方四正联动
+    L.push('<div class="jp-sub-tt">2.1　命宫详解 · 你的人格内核</div>');
     if (soulMs.length) {
-      L.push(`<p>你的命宫坐落于 <span class="pal-hl">${soul.heavenlyStem}${soul.earthlyBranch}</span>，主星为 ${soulMs.map((n) => `<span class="star-hl">${n}</span>`).join('、')}${borrowed ? '（命宫无主星，借对宫迁移宫之星论）' : ''}。这组星耀奠定了你一生的性格基调与人生格局：</p>`);
+      L.push(`<p>命宫坐 <span class="pal-hl">${soul.heavenlyStem}${soul.earthlyBranch}</span>，主星 ${soulMs.map((n) => `<span class="star-hl">${n}</span>`).join('、')}${borrowed ? '（命宫无正曜，借对宫迁移宫之星论命）' : ''}：</p>`);
       L.push('<ul class="jp-list">');
-      soulMs.forEach((n) => { if (STAR_TRAITS[n]) L.push(`<li><b>${n}</b>：${STAR_TRAITS[n]}。</li>`); });
+      soulMs.forEach((n) => {
+        const b = soulOwn.includes(n) ? starBrightness(d, '命宫', n) : '';
+        const bn = b ? brightnessNote(b) : null;
+        L.push(`<li><b>${n}</b>${b ? `<span class="rd-bright">${b}</span>` : ''}：${STAR_TRAITS[n] || ''}。${STAR_PERSONA[n] ? '<br><span class="jp-dim">外在表现：' + STAR_PERSONA[n] + '</span>' : ''}${bn ? `<br><span class="jp-dim jp-b-${bn.tone}">庙旺落陷：${bn.txt}。</span>` : ''}</li>`);
+      });
       L.push('</ul>');
     } else {
-      L.push('<p>你的命宫无主星，性格较灵活多变、善于因应环境，需靠后天主动确立人生方向。此类命格反而格局开阔，可塑性高。</p>');
+      L.push('<p>命宫无主星，性格灵活善变、易受环境与身边人影响，需靠后天主动确立方向。此类命格反而格局开阔、可塑性高。</p>');
     }
-    if (ELEM_NOTE[d.fiveElementsClass]) {
-      L.push(`<p class="jp-note"><b>五行局：</b>${ELEM_NOTE[d.fiveElementsClass]}。命主星为<b>${d.soul}</b>，身主星为<b>${d.body}</b>——命主主先天禀赋与人生走向，身主主后天努力与中晚年的依归。</p>`);
+    // 命宫辅煞
+    const soulAux = palaceAux(d, '命宫');
+    if (soulAux.lucky.length || soulAux.harsh.length) {
+      L.push(`<p class="jp-note"><b>辅煞配置：</b>${soulAux.lucky.length ? '吉星 <b class="t-good">' + soulAux.lucky.join('、') + '</b> 增辉助力' : ''}${soulAux.lucky.length && soulAux.harsh.length ? '；' : ''}${soulAux.harsh.length ? '煞星 <b class="t-bad">' + soulAux.harsh.join('、') + '</b> 带来磨练与冲击，吉星力量打折，需以耐心化解' : ''}。</p>`);
     }
-    // 格局判断
-    const pat = detectPattern(d);
-    if (pat) L.push(`<div class="jp-highlight"><span class="jp-hl-tag">格局</span>${pat}</div>`);
-    L.push('</div>');
+    // 三方四正联动
+    const triParts = [];
+    ['迁移', '财帛', '官禄'].forEach((pn) => {
+      const ms = pMajors(d, pn);
+      if (ms.length) triParts.push(`${pn}宫（${ms.join('、')}）`);
+    });
+    L.push(`<p class="jp-note"><b>三方四正联动：</b>命宫不孤论，须合参 ${triParts.join('、') || '迁移/财帛/官禄三方'}。${mainPat ? `三方组合成「${mainPat.name}」，${mainPat.desc}` : '三方星情共同决定你处世、求财、立业的整体格局。'}</p>`);
+    // 天赋与短板
+    const giftWords = Array.from(new Set(tagPool)).slice(0, 5);
+    const jiInTri = mutFound.filter((m) => m.mut === '忌' && ['命宫', '迁移', '财帛', '官禄'].includes(m.palace));
+    L.push(`<p><b>天赋长板：</b>${giftWords.length ? giftWords.join('、') : '务实稳健'}。<b style="margin-left:8px">先天短板：</b>${soulAux.harsh.length ? '命宫会照' + soulAux.harsh.join('、') + '，性格易冲动或带磨练；' : ''}${jiInTri.length ? '三方见' + jiInTri.map((m) => m.star + '化忌（' + m.palace + '宫）').join('、') + '，相关领域需多用心；' : ''}${(!soulAux.harsh.length && !jiInTri.length) ? '无明显硬伤，整体均衡，宜专注发挥长处。' : '宜以修养与耐心化解，化煞为用。'}</p>`);
 
-    // —— 二、性格与心性 ——
-    L.push(sec('s2', '二', '性格与心性', '命宫定外在表现，福德宫定内在精神世界'));
-    L.push('<div class="jp-body">');
-    L.push(`<p><b>外在性格（命宫）：</b>${soulMs.length ? soulMs.map((n) => STAR_PERSONA[n] ? `${n}使你${STAR_PERSONA[n].split('；')[0]}` : n).join('；') + '。' : '随和善变、易受环境影响，宜主动立志。'}</p>`);
-    const fude = jpStarLines(d, '福德', STAR_TRAITS);
+    // 2.2 身宫
+    L.push('<div class="jp-sub-tt" style="margin-top:18px">2.2　身宫 · 后半生的依归</div>');
+    const bodyP = d.palaces.find((p) => p.isBodyPalace);
+    if (bodyP) {
+      const bms = majorNames(bodyP).length ? majorNames(bodyP) : pMajors(d, bodyP.name);
+      L.push(`<p>身宫与<b>${/宫$/.test(bodyP.name) ? bodyP.name : bodyP.name + '宫'}</b>同宫（${PALACE_MEANING[bodyP.name] || ''}），主星 ${bms.length ? bms.join('、') : '借对宫'}。身宫代表<b>35岁后逐渐显现、后半生着力经营的方向</b>——你中晚年的重心与归属，会越来越向这个宫位所主的人生领域靠拢。${bms.some((n) => STAR_TRAITS[n]) ? '其中 ' + bms.filter((n) => STAR_TRAITS[n]).map((n) => n + '（' + STAR_TRAITS[n].split('，')[0] + '）').join('、') + ' 的特质会在后半生更突出。' : ''}</p>`);
+    } else {
+      L.push('<p>身宫信息从略。</p>');
+    }
+
+    // 2.3 福德宫
+    L.push('<div class="jp-sub-tt" style="margin-top:18px">2.3　福德宫 · 精神与福气根基</div>');
+    const fude = pMajors(d, '福德');
     const fudeP = findPalace(d, '福德');
-    const fudeMut = fudeP ? [...fudeP.majorStars, ...fudeP.minorStars].filter((s) => s.mutagen) : [];
-    L.push(`<p><b>内在精神（福德宫）：</b>${fude.length ? '福德宫主星为 ' + fude.map((x) => `<span class="star-hl">${x.star}</span>`).join('、') + '，' : ''}${auxClaim('福德', pMajors(d, '福德'), fudeMut.map((s) => s.name + '化' + s.mutagen))}你的兴趣、品味与精神享受多由此而来。</p>`);
+    const fudeMut = fudeP ? [...fudeP.majorStars, ...fudeP.minorStars].filter((s) => s.mutagen).map((s) => s.name + '化' + s.mutagen) : [];
+    L.push(`<p>${fude.length ? '福德宫主星为 ' + fude.map((n) => `<span class="star-hl">${n}</span>`).join('、') + '。' : '福德宫借对宫论。'}${auxClaim('福德', fude, fudeMut)}你的兴趣、品味、精神享受与抗压能力多由此而来——福德安定者心宽福厚，福德见忌煞者则需主动调心、培养寄托。</p>`);
+
+    // 2.4 疾厄宫
+    L.push('<div class="jp-sub-tt" style="margin-top:18px">2.4　疾厄宫 · 先天体质底层</div>');
+    const jiMs = pMajors(d, '疾厄');
+    const jiP = findPalace(d, '疾厄');
+    const jiMut = jiP ? [...jiP.majorStars, ...jiP.minorStars].filter((s) => s.mutagen).map((s) => s.name + '化' + s.mutagen) : [];
+    L.push(`<p>${auxClaim('疾厄', jiMs, jiMut)}</p>`);
+    L.push('<p class="jp-note">提醒：命理仅作体质倾向参考，不能替代医学诊断，身体不适请及时就医。</p>');
     L.push('</div>');
 
-    // —— 三、事业与方向 ——
-    L.push(sec('s3', '三', '事业与方向', '官禄宫主事业舞台，命主星指引适合的方向'));
+    // ============ 第三部分：十二宫人事专项拆解 ============
+    L.push(sec('s3', '三', '十二宫人事专项拆解', '分三大板块——三合看静态格局，四化看动态因果'));
     L.push('<div class="jp-body">');
+
+    // 3.1 亲缘六亲板块
+    L.push('<div class="jp-sub-tt">3.1　亲缘六亲板块</div>');
+    L.push('<ul class="jp-list">');
+    [['父母', '父母长辈'], ['兄弟', '兄弟手足'], ['夫妻', '婚姻配偶'], ['子女', '子女缘分']].forEach(([pn, label]) => {
+      const ms = pMajors(d, pn);
+      const p = findPalace(d, pn);
+      const muts = p ? [...p.majorStars, ...p.minorStars].filter((s) => s.mutagen).map((s) => s.name + '化' + s.mutagen) : [];
+      const fl = flyMutagen(d, pn).filter((f) => f.to && (f.mut === '禄' || f.mut === '忌'));
+      const flTxt = fl.length ? ` <span class="jp-dim">飞星：${fl.map((f) => f.star + '化' + f.mut + '入' + f.to + '宫').join('、')}。</span>` : '';
+      L.push(`<li><b>${label}（${pn}宫）：</b>主星 ${ms.length ? ms.join('、') : '借对宫'}${muts.length ? '，引动 ' + muts.join('、') : ''}。${kinClaim(pn, ms, muts)}${flTxt}</li>`);
+    });
+    L.push('</ul>');
+
+    // 3.2 财富事业板块
+    L.push('<div class="jp-sub-tt" style="margin-top:18px">3.2　财富事业板块</div>');
+    // 官禄
     const guan = pMajors(d, '官禄');
     const guanP = findPalace(d, '官禄');
     const guanMut = guanP ? [...guanP.majorStars, ...guanP.minorStars].filter((s) => s.mutagen).map((s) => s.name + '化' + s.mutagen) : [];
-    L.push(`<p>你的官禄宫主星为 ${guan.length ? guan.map((n) => `<span class="star-hl">${n}</span>`).join('、') : '（借对宫论）'}${guanMut.length ? `，引动 ${guanMut.join('、')}` : ''}，代表你的事业舞台与社会成就方向。</p>`);
+    L.push(`<p><b>事业（官禄宫）：</b>主星 ${guan.length ? guan.map((n) => `<span class="star-hl">${n}</span>`).join('、') : '借对宫论'}${guanMut.length ? `，引动 ${guanMut.join('、')}` : ''}。</p>`);
     const careers = guan.filter((n) => STAR_CAREER[n]);
     if (careers.length) {
       L.push('<div class="jp-cards">');
       careers.forEach((n) => {
         const c = STAR_CAREER[n];
-        L.push(`<div class="jp-card">
-          <div class="jp-card-h"><span class="star-hl">${n}</span> 型事业</div>
-          <div class="jp-card-row"><span class="k">特质</span><span>${c.style}</span></div>
-          <div class="jp-card-row"><span class="k">适合领域</span><span>${c.field}</span></div>
-          <div class="jp-card-row"><span class="k">建议</span><span>${c.tip}</span></div>
-        </div>`);
+        L.push(`<div class="jp-card"><div class="jp-card-h"><span class="star-hl">${n}</span> 型事业</div><div class="jp-card-row"><span class="k">特质</span><span>${c.style}</span></div><div class="jp-card-row"><span class="k">适合领域</span><span>${c.field}</span></div><div class="jp-card-row"><span class="k">建议</span><span>${c.tip}</span></div></div>`);
       });
       L.push('</div>');
     }
-    if (guanMut.some((m) => m.endsWith('忌'))) L.push('<p class="jp-warn">⚠ 官禄宫见化忌，事业上易有反复或较大波动，宜专精一行、稳健经营，避免频繁转换跑道。</p>');
-    L.push('</div>');
-
-    // —— 四、财富格局 ——
-    L.push(sec('s4', '四', '财富格局', '财帛宫看赚钱方式，田宅宫看财富能否守住'));
-    L.push('<div class="jp-body">');
+    if (guanMut.some((m) => m.endsWith('忌'))) L.push('<p class="jp-warn">⚠ 官禄宫见化忌，事业上易有反复或波动，宜专精一行、稳健经营。</p>');
+    // 财帛
     const cai = jpStarLines(d, '财帛', STAR_WEALTH);
     const caiP = findPalace(d, '财帛');
     const caiMut = caiP ? [...caiP.majorStars, ...caiP.minorStars].filter((s) => s.mutagen).map((s) => s.name + '化' + s.mutagen) : [];
-    if (cai.length) {
-      L.push('<ul class="jp-list">');
-      cai.forEach((x) => L.push(`<li><b>${x.star}</b>：${x.text}。</li>`));
-      L.push('</ul>');
-    } else {
-      L.push('<p>财帛宫无主星，财源较随三方借力而定，宜建立稳定的开源管道与储蓄纪律。</p>');
-    }
+    L.push(`<p><b>财帛宫（赚钱方式）：</b></p>`);
+    if (cai.length) { L.push('<ul class="jp-list">'); cai.forEach((x) => L.push(`<li><b>${x.star}</b>：${x.text}。</li>`)); L.push('</ul>'); }
+    else L.push('<p>财帛宫无主星，财源随三方借力，宜建立稳定开源与储蓄纪律。</p>');
     if (caiMut.length) {
       const lu = caiMut.find((m) => m.endsWith('禄')); const ji = caiMut.find((m) => m.endsWith('忌'));
-      if (lu) L.push(`<p class="jp-good">✦ 财帛宫见 ${lu}，主财源活络、有进财机会，财运是你的相对优势。</p>`);
-      if (ji) L.push(`<p class="jp-warn">⚠ 财帛宫见 ${ji}，钱财上易执着或有破耗，宜量入为出、分散风险。</p>`);
+      if (lu) L.push(`<p class="jp-good">✦ 财帛宫见 ${lu}，财源活络、有进财机会。</p>`);
+      if (ji) L.push(`<p class="jp-warn">⚠ 财帛宫见 ${ji}，钱财上易执着或破耗，宜量入为出。</p>`);
     }
-    // 田宅守财
+    // 田宅 + 迁移
     const tian = pMajors(d, '田宅');
-    L.push(`<p><b>守财与不动产（田宅宫）：</b>主星为 ${tian.length ? tian.join('、') : '（借对宫论）'}。田宅宫是财富的「最终归宿」，${tian.some((n) => ['天府', '太阴', '武曲'].includes(n)) ? '你的田宅星情偏稳，较能守住资产、适合以不动产积累财富' : '宜有意识地把流动财转为固定资产，强化储蓄与置产规划'}。</p>`);
-    L.push('</div>');
+    L.push(`<p><b>田宅宫（守财与家业）：</b>主星 ${tian.length ? tian.join('、') : '借对宫论'}。田宅是财富的最终归宿，${tian.some((n) => ['天府', '太阴', '武曲'].includes(n)) ? '你田宅星情偏稳，较能守住资产、宜以不动产积累财富' : '宜有意识地把流动财转为固定资产，强化置产与储蓄'}。</p>`);
+    const qian = pMajors(d, '迁移');
+    const qianP = findPalace(d, '迁移');
+    const qianMut = qianP ? [...qianP.majorStars, ...qianP.minorStars].filter((s) => s.mutagen).map((s) => s.name + '化' + s.mutagen) : [];
+    L.push(`<p><b>迁移宫（外出际遇）：</b>主星 ${qian.length ? qian.join('、') : '借对宫论'}。${auxClaim('迁移', qian, qianMut)}</p>`);
 
-    // —— 五、感情婚姻 ——
-    L.push(sec('s5', '五', '感情婚姻', '夫妻宫定配偶类型与婚姻品质'));
-    L.push('<div class="jp-body">');
-    const fu = jpStarLines(d, '夫妻', STAR_LOVE);
-    const fuP = findPalace(d, '夫妻');
-    const fuMs = pMajors(d, '夫妻');
-    const fuMut = fuP ? [...fuP.majorStars, ...fuP.minorStars].filter((s) => s.mutagen).map((s) => s.name + '化' + s.mutagen) : [];
-    if (fu.length) {
-      L.push('<ul class="jp-list">');
-      fu.forEach((x) => L.push(`<li><b>${x.star}</b>：${x.text}。</li>`));
-      L.push('</ul>');
+    // 3.3 交友宫
+    L.push('<div class="jp-sub-tt" style="margin-top:18px">3.3　交友宫 · 人际圈层</div>');
+    const pu = findPalace(d, '仆役') || findPalace(d, '交友');
+    if (pu) {
+      const pms = majorNames(pu).length ? majorNames(pu) : [];
+      const puMut = [...pu.majorStars, ...pu.minorStars].filter((s) => s.mutagen).map((s) => s.name + '化' + s.mutagen);
+      const hasJi = puMut.some((m) => m.endsWith('忌'));
+      L.push(`<p>交友宫（仆役宫）主星 ${pms.length ? pms.join('、') : '借对宫'}${puMut.length ? '，引动 ' + puMut.join('、') : ''}。${hasJi ? '你的人际圈中容易遇到是非、被拖累或交浅言深，择友宜慎，合作前先看清人品。' : (pms.some((n) => ['天府', '天同', '天梁'].includes(n)) ? '你的朋友、下属多能成为助力，人脉是你的资源，宜真诚经营。' : '你的人际关系平和，朋友圈以平淡交往为主，益友损友皆有，重在主动筛选。')}</p>`);
     } else {
-      L.push('<p>夫妻宫无主星，配偶特质较多元、感情受后天经营影响大，宜主动沟通、用心维系。</p>');
+      L.push('<p>交友宫信息从略。</p>');
     }
-    L.push(`<p class="jp-note"><b>命盘判断：</b>${kinClaim('夫妻', fuMs, fuMut)}</p>`);
     L.push('</div>');
 
-    // —— 六、六亲家庭 ——
-    L.push(sec('s6', '六', '六亲家庭', '父母、兄弟、子女宫看你与至亲的缘分'));
-    L.push('<div class="jp-body"><ul class="jp-list">');
-    [['父母', '父母长辈'], ['兄弟', '兄弟手足'], ['子女', '子女缘分']].forEach(([pn, label]) => {
-      const ms = pMajors(d, pn);
-      const p = findPalace(d, pn);
-      const muts = p ? [...p.majorStars, ...p.minorStars].filter((s) => s.mutagen).map((s) => s.name + '化' + s.mutagen) : [];
-      L.push(`<li><b>${label}（${pn}宫）：</b>主星 ${ms.length ? ms.join('、') : '借对宫'}。${kinClaim(pn, ms, muts)}</li>`);
-    });
-    L.push('</ul></div>');
-
-    // —— 七、健康提醒 ——
-    L.push(sec('s7', '七', '健康提醒', '疾厄宫提示先天体质与需留意的部位'));
+    // ============ 第四部分：四化飞星·全盘因果逻辑 ============
+    L.push(sec('s4', '四', '四化飞星 · 全盘因果逻辑', '生年四化定先天，命宫干四化定后天，飞化联动与自化揭示牵一发动全身的因果'));
     L.push('<div class="jp-body">');
-    const jiP = findPalace(d, '疾厄');
-    const jiMut = jiP ? [...jiP.majorStars, ...jiP.minorStars].filter((s) => s.mutagen).map((s) => s.name + '化' + s.mutagen) : [];
-    L.push(`<p>${auxClaim('疾厄', pMajors(d, '疾厄'), jiMut)}</p>`);
-    L.push('<p class="jp-note">提醒：命理仅作体质倾向参考，不能替代医学诊断，身体不适请及时就医。</p>');
+    L.push(buildFlyingStar(d));
     L.push('</div>');
 
-    // —— 八、大限运势走向 ——
-    L.push(sec('s8', '八', '大限运势走向', '先看当前十年大限与今年流年的运程聚焦，再纵览各阶段节奏'));
+    // ============ 第五部分：时限运势推演 ============
+    L.push(sec('s5', '五', '时限运势推演', '大限分十年、流年看当下——人生节奏的时间地图'));
     L.push('<div class="jp-body">');
+    // 5.1 当前运程聚焦
     const nowFortune = buildCurrentFortune(d);
     if (nowFortune) {
-      L.push('<div class="jp-now-wrap"><div class="jp-sub-tt">当前运程聚焦 · 大限 × 流年</div>');
+      L.push('<div class="jp-sub-tt">5.1　当前运程聚焦 · 大限 × 流年</div>');
       L.push(nowFortune);
-      L.push('</div>');
     }
-    L.push('<div class="jp-sub-tt" style="margin-top:18px">完整大限时间轴</div>');
+    // 5.2 大限十年分段
+    L.push('<div class="jp-sub-tt" style="margin-top:20px">5.2　大限十年分段</div>');
     L.push(buildDecadalTimeline(d));
-    L.push('</div>');
-
-    // —— 九、先天四化 ——
-    L.push(sec('s9', '九', '先天四化', '生年四化标示你天生的助力与课题'));
-    L.push('<div class="jp-body">');
-    const mutFound = [];
-    d.palaces.forEach((p) => {
-      [...p.majorStars, ...p.minorStars].forEach((s) => { if (s.mutagen) mutFound.push({ star: s.name, mut: s.mutagen, palace: p.name }); });
-    });
-    if (mutFound.length) {
-      const order = { '禄': 0, '权': 1, '科': 2, '忌': 3 };
-      mutFound.sort((a, b) => (order[a.mut] ?? 9) - (order[b.mut] ?? 9));
-      L.push('<ul class="jp-list">');
-      mutFound.forEach((m) => {
-        L.push(`<li>${mutBadge(m.mut)} <b>${m.star}</b> 化${m.mut} 落 <span class="pal-hl">${m.palace}宫</span>——${MUT_MEANING[m.mut]}。${m.mut === '忌' ? '这是你此生需要用心化解、不可回避的功课所在。' : '这是你天生带来的福分与机会，宜善加把握。'}</li>`);
-      });
-      L.push('</ul>');
-    } else {
-      L.push('<p>本盘生年四化信息从略。</p>');
+    // 5.3 近10年重点流年预判
+    const yf = buildYearlyForecast(d);
+    if (yf) {
+      L.push('<div class="jp-sub-tt" style="margin-top:20px">5.3　近10年重点流年预判</div>');
+      L.push('<p class="jp-lead-sm">依流年四化落本命宫推演，标注感情、事业、破财、健康等高发年份——红色为需留意、绿色为机会窗口。</p>');
+      L.push(yf);
     }
+    // 5.4 流月参考
+    L.push('<div class="jp-sub-tt" style="margin-top:20px">5.4　流月简易参考</div>');
+    L.push('<p class="jp-note">流月运势在流年基础上层层细分：临近的<b>关键年份</b>（上方标红或标绿者），建议进一步结合流月细看——通常流年化忌所冲之月、与流年命宫相同地支之月，是当年最需留意或最值得把握的月份。日常决策以大限、流年为主即可，不必过度纠结流月细节。</p>');
     L.push('</div>');
 
-    // —— 十、综合建议 ——
-    L.push(sec('s10', '十', '综合建议', '扬长避短，把命盘读成行动指南'));
+    // ============ 第六部分：综合总结 + 落地趋吉避凶方案 ============
+    L.push(sec('s6', '六', '综合总结 + 趋吉避凶方案', '把整张盘收束成一份可执行的人生行动指南'));
     L.push('<div class="jp-body">');
-    L.push(buildAdvice(d, soulMs, mutFound));
+    // 6.1 优势天赋 / 6.2 核心短板
+    const strengths = [];
+    soulMs.forEach((n) => { if (STAR_TAGS[n]) strengths.push(...STAR_TAGS[n]); });
+    const goodMut = mutFound.filter((m) => m.mut !== '忌');
+    const jiMutAll = mutFound.filter((m) => m.mut === '忌');
+    L.push(`<div class="jp-adv jp-adv-good"><div class="jp-adv-t">6.1　全盘优势天赋</div><p>你天生具备 <b>${Array.from(new Set(strengths)).slice(0, 5).join('、') || '务实稳健'}</b> 等特质。${goodMut.length ? '生年 ' + goodMut.map((m) => m.star + '化' + m.mut).join('、') + ' 落在 ' + Array.from(new Set(goodMut.map((m) => m.palace + '宫'))).join('、') + '，是你最容易出成果的领域，宜重点投入、把长板做到极致。' : '宜认清自身长处，专注发挥，把一两件事做深做透。'}${mainPat ? '主格局「' + mainPat.name + '」是你立身的根本优势。' : ''}</p></div>`);
+    L.push(`<div class="jp-adv jp-adv-warn"><div class="jp-adv-t">6.2　终身核心短板 · 人生陷阱</div><p>${jiMutAll.length ? '生年 ' + jiMutAll.map((m) => m.star + '化忌').join('、') + ' 落在 ' + Array.from(new Set(jiMutAll.map((m) => m.palace + '宫'))).join('、') + '，是你此生不可回避的功课——遇到相关领域宜多一分谨慎与耐心，化执着为修炼。' : '你的命盘没有明显硬伤，整体较均衡，保持平常心、稳健前行即可。'}${soulAux.harsh.length ? '另命宫会照 ' + soulAux.harsh.join('、') + '，性格中带有冲动或磨练，是最易绊倒自己的内在陷阱，宜以修养自律化解。' : ''}</p></div>`);
+
+    // 6.3 分维度实操建议
+    L.push('<div class="jp-sub-tt" style="margin-top:8px">6.3　分维度实操建议</div>');
+    L.push('<div class="jp-plan">');
+    // 事业
+    L.push(`<div class="jp-plan-item"><span class="jp-plan-k">事业</span><span class="jp-plan-v">${careers.length ? '走 <b>' + careers.join('、') + '</b> 型路线：' + STAR_CAREER[careers[0]].tip + '。' : '宜专精一门、稳健积累。'}${guanMut.some((m) => m.endsWith('忌')) ? '官禄见忌，避免频繁转行。' : ''}</span></div>`);
+    // 财运
+    L.push(`<div class="jp-plan-item"><span class="jp-plan-k">财运</span><span class="jp-plan-v">${cai.length ? cai[0].text + '；' : ''}${caiMut.find((m) => m.endsWith('忌')) ? '财帛见忌，量入为出、分散风险、远离高杠杆。' : '建立强制储蓄，把流动财逐步转为不动产固化。'}</span></div>`);
+    // 感情
+    const loveLines = jpStarLines(d, '夫妻', STAR_LOVE);
+    const fuMs2 = pMajors(d, '夫妻');
+    const fuP2 = findPalace(d, '夫妻');
+    const fuMut2 = fuP2 ? [...fuP2.majorStars, ...fuP2.minorStars].filter((s) => s.mutagen).map((s) => s.name + '化' + s.mutagen) : [];
+    L.push(`<div class="jp-plan-item"><span class="jp-plan-k">感情</span><span class="jp-plan-v">${loveLines.length ? loveLines[0].text + '；' : ''}${kinClaim('夫妻', fuMs2, fuMut2)}</span></div>`);
+    // 健康
+    L.push(`<div class="jp-plan-item"><span class="jp-plan-k">健康</span><span class="jp-plan-v">${auxClaim('疾厄', jiMs, jiMut)}建议作息规律、定期体检，针对薄弱部位提前养护。</span></div>`);
+    // 人际
+    L.push(`<div class="jp-plan-item"><span class="jp-plan-k">人际</span><span class="jp-plan-v">${(function () { const pp = findPalace(d, '仆役') || findPalace(d, '交友'); const pm = pp ? [...pp.majorStars, ...pp.minorStars].filter((s) => s.mutagen).map((s) => s.name + '化' + s.mutagen) : []; return pm.some((m) => m.endsWith('忌')) ? '交友宫见忌，择友宜慎、合作先看人品，防是非小人。' : '真诚经营人脉，贵人多在平时积累，主动筛选益友。'; })()}</span></div>`);
+    L.push('</div>');
+
+    // 理性结语
+    L.push(`<div class="jp-adv jp-adv-tip"><div class="jp-adv-t">理性结语</div><p>命盘只是底色，真正决定人生的是你的选择与努力。这份解读基于「三方四正合参 + 飞星四化推因果」的传统方法自动生成，旨在帮你<b>认识自己、扬长避短</b>，而非框定命运。${tone.word.includes('挑战') ? '纵有磨练，后天的努力与修养足以明显改善先天格局。' : '把先天优势用足、把功课做扎实，便能走出一条踏实而精彩的路。'}愿你把它当作一面认识自己的镜子，而非束缚自己的标签。</p></div>`);
     L.push('</div>');
 
     // 免责
-    L.push(`<div class="jp-disclaimer">说明：本解盘基于命宫、三方四正、各宫主星与生年四化的传统含义自动生成，遵循「单星不论命、需合参三方四正」的原则，仅供文化娱乐与自我认识参考，<b>不构成对健康、寿命、婚姻、财富等的预测或决定性结论</b>。人生由后天努力与选择共同书写，命盘只是认识自己的一面镜子。重大决策请理性判断，健康问题请咨询专业医师。</div>`);
+    L.push(`<div class="jp-disclaimer">说明：本解盘基于命宫、三方四正、各宫主星、生年四化与飞星四化的传统含义自动生成，遵循「单星不论命、需合参三方四正」的原则，仅供文化娱乐与自我认识参考，<b>不构成对健康、寿命、婚姻、财富等的预测或决定性结论</b>。人生由后天努力与选择共同书写，命盘只是认识自己的一面镜子。重大决策请理性判断，健康问题请咨询专业医师。</div>`);
 
     return L.join('\n');
   }

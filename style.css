@@ -583,6 +583,94 @@ body {
 .jp-disclaimer { margin-top: 22px; padding: 14px 18px; background: #fbf3f2; border-radius: 10px; font-size: 12.5px; color: #a05a52; line-height: 1.75; }
 .jp-body .mut-badge { display: inline-block; color: #fff; border-radius: 3px; padding: 0 4px; font-size: 12px; font-weight: 700; }
 
+/* ====== 六部分结构 新增样式 ====== */
+.jp-sub-tt { margin-top: 4px; }
+.jp-lead-sm { font-size: 13px; color: #6f6657; line-height: 1.75; margin: 2px 0 12px; }
+.jp-dim { color: #8a8170; font-size: 12.5px; }
+.jp-b-good { color: #1a6b3e; } .jp-b-tough { color: #a8492f; } .jp-b-mid { color: #b0883c; }
+.jp-body b.t-good { color: #1a6b3e; } .jp-body b.t-bad { color: #a8492f; }
+
+/* 1.1 出生信息档案 */
+.jp-archive { background: #fbf7ec; border: 1px solid #ece0c4; border-radius: 10px; padding: 6px 14px; margin-bottom: 12px; }
+.jp-arc-row { display: flex; gap: 12px; padding: 7px 0; font-size: 13px; line-height: 1.6; border-bottom: 1px dashed #ece0c4; }
+.jp-arc-row:last-child { border-bottom: none; }
+.jp-arc-row .k { flex-shrink: 0; width: 86px; color: #9a8e74; font-weight: 600; }
+.jp-arc-row span:last-child { color: #3a342b; }
+
+/* 1.1 定盘校验 */
+.jp-dp-verify { border-radius: 10px; padding: 12px 16px; margin: 12px 0; border: 1px solid #cde9d6; background: #f0f8f2; }
+.jp-dp-verify.low { border-color: #f0d6cc; background: #fdf2ee; }
+.jp-dp-v-h { display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px; }
+.jp-dp-v-h span { font-size: 13.5px; font-weight: 700; color: #6b3f1d; }
+.jp-dp-v-h b { font-size: 22px; color: #1f9d55; }
+.jp-dp-verify.low .jp-dp-v-h b { color: #d2664f; }
+.jp-dp-v-h em { font-size: 12px; color: #7a8f7e; margin-left: auto; font-style: normal; }
+.jp-dp-v-dims { display: flex; flex-direction: column; gap: 6px; }
+.jp-dp-v-dim { display: flex; align-items: center; gap: 10px; font-size: 12.5px; }
+.jp-dp-v-dim .lbl { flex-shrink: 0; width: 56px; color: #6f6657; }
+.jp-dp-v-dim .bar { flex: 1; height: 7px; background: #eadfca; border-radius: 4px; overflow: hidden; }
+.jp-dp-v-dim .bar i { display: block; height: 100%; border-radius: 4px; }
+.jp-dp-v-dim .val { flex-shrink: 0; width: 28px; text-align: right; font-weight: 700; color: #6b3f1d; }
+
+/* 1.2 生年四化一行 */
+.jp-mut-line { margin: 4px 0 0; }
+.jp-mut-line li { line-height: 1.9; }
+
+/* 1.3 格局总评 */
+.jp-pat-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+.jp-pat { border-radius: 10px; padding: 10px 14px; border-left: 4px solid #ccc; background: #fbf7ec; }
+.jp-pat-h { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.jp-pat-name { font-size: 14px; font-weight: 700; color: #6b3f1d; }
+.jp-pat-tag { font-size: 11px; padding: 1px 8px; border-radius: 8px; color: #fff; background: #b0883c; }
+.jp-pat-desc { font-size: 13px; color: #4a4a4a; line-height: 1.75; }
+.jp-pat.pat-main { border-left-color: #c0392b; background: #fcf2ef; } .jp-pat.pat-main .jp-pat-tag { background: #c0392b; }
+.jp-pat.pat-good { border-left-color: #1f9d55; background: #f0f8f2; } .jp-pat.pat-good .jp-pat-tag { background: #1f9d55; }
+.jp-pat.pat-bad { border-left-color: #d2664f; background: #fdf2ee; } .jp-pat.pat-bad .jp-pat-tag { background: #d2664f; }
+.jp-pat.pat-mid { border-left-color: #b0883c; }
+.jp-tone { display: flex; flex-direction: column; gap: 4px; padding: 12px 16px; border-radius: 10px; background: #eef3f9; }
+.jp-tone-word { font-size: 15px; font-weight: 700; color: #1a3a5c; }
+.jp-tone-txt { font-size: 13px; color: #4a4a4a; line-height: 1.75; }
+.jp-tone-good { background: #e9f6ee; } .jp-tone-good .jp-tone-word { color: #1a6b3e; }
+.jp-tone-tough { background: #fdf1ee; } .jp-tone-tough .jp-tone-word { color: #a8492f; }
+
+/* 4.1 生年四化四列 */
+.jp-mut-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 12px; }
+.jp-mut-col { background: #fbf7ec; border: 1px solid #ece0c4; border-radius: 10px; padding: 8px; }
+.jp-mut-col-h { font-size: 13px; font-weight: 700; color: #6b3f1d; display: flex; align-items: center; gap: 5px; flex-wrap: wrap; margin-bottom: 7px; }
+.jp-mut-col-h em { font-size: 11px; color: #9a8e74; font-weight: 400; font-style: normal; width: 100%; }
+.jp-mut-col.m-禄 { border-top: 3px solid #1f9d55; } .jp-mut-col.m-权 { border-top: 3px solid #2b6cb0; }
+.jp-mut-col.m-科 { border-top: 3px solid #b0883c; } .jp-mut-col.m-忌 { border-top: 3px solid #d2664f; }
+.jp-mut-row { font-size: 12.5px; color: #3a342b; line-height: 1.6; padding: 4px 0; border-top: 1px dashed #ece0c4; }
+.jp-mut-row:first-of-type { border-top: none; }
+.jp-mut-row.empty { color: #b3a98f; }
+.jp-mut-field { display: block; font-size: 11px; color: #9a8e74; }
+.jp-self li { line-height: 1.8; }
+
+/* 5.3 流年预判 */
+.jp-yf { display: flex; flex-direction: column; gap: 7px; }
+.jp-yf-row { display: flex; gap: 12px; align-items: center; padding: 9px 12px; border-radius: 10px; background: #fbf7ec; border-left: 4px solid #c8b896; }
+.jp-yf-row.good { background: #f0f8f2; border-left-color: #1f9d55; }
+.jp-yf-row.tough { background: #fdf2ee; border-left-color: #d2664f; }
+.jp-yf-row.mid { background: #fbf7ec; border-left-color: #b0883c; }
+.jp-yf-yr { flex-shrink: 0; width: 56px; font-size: 16px; font-weight: 700; color: #6b3f1d; line-height: 1.1; }
+.jp-yf-yr span { display: block; font-size: 10px; color: #9a8e74; font-weight: 400; }
+.jp-yf-body { flex: 1; }
+.jp-yf-seat { font-size: 12px; color: #6f6657; margin-bottom: 5px; }
+.jp-yf-seat b { color: #1a3a5c; }
+.jp-yf-tags { display: flex; flex-wrap: wrap; gap: 5px; }
+.jp-yf-tag { font-size: 11.5px; padding: 2px 9px; border-radius: 8px; line-height: 1.5; }
+.jp-yf-tag.good { background: #d9f0e1; color: #1a6b3e; }
+.jp-yf-tag.bad { background: #fadbd2; color: #a8492f; }
+.jp-yf-tag.mid { background: #efe5cf; color: #8a6a2c; }
+
+/* 6.3 实操建议 */
+.jp-plan { display: flex; flex-direction: column; gap: 0; background: #fbf7ec; border: 1px solid #ece0c4; border-radius: 10px; padding: 4px 14px; margin-bottom: 14px; }
+.jp-plan-item { display: flex; gap: 12px; padding: 10px 0; border-bottom: 1px dashed #ece0c4; font-size: 13px; line-height: 1.75; }
+.jp-plan-item:last-child { border-bottom: none; }
+.jp-plan-k { flex-shrink: 0; width: 40px; font-weight: 700; color: #c0392b; }
+.jp-plan-v { flex: 1; color: #4a4a4a; }
+.jp-plan-v b { color: #6b3f1d; }
+
 /* 窄屏：并排回退为上下堆叠 */
 @media (max-width: 980px) {
   .result { flex-direction: column; }
@@ -596,4 +684,7 @@ body {
   .ci-rows { grid-template-columns: 1fr; }
   .palace-name { font-size: 11px; }
   .reading { padding: 16px; }
+  .jp-mut-grid { grid-template-columns: repeat(2, 1fr); }
+  .jp-arc-row .k { width: 72px; }
+  .jp-yf-yr { width: 48px; font-size: 15px; }
 }
