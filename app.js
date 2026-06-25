@@ -943,7 +943,7 @@
       const isCurrent = age && age >= dec.start && age <= dec.end;
       const tag = isCurrent ? '（你正走在这步大限）' : '';
       add('d3',
-        `<span class="q-hl">${dec.start}–${dec.end}岁</span>${yrSpan}这十年${tag}，你的大限走入 <span class="q-pal">${pal.name}宫</span>${ms.length ? `（${ms.join('、')}）` : '（无主星）'}${muts.length ? `，引动 ${muts.join('、')}` : ''}。命盘判断：<span class="q-key">${claim}</span>`,
+        `<span class="q-hl">${dec.start}–${dec.end}岁</span>${yrSpan}这十年${tag}，你的大限走入 <span class="q-pal">${/宫$/.test(pal.name) ? pal.name : pal.name + '宫'}</span>${ms.length ? `（${ms.join('、')}）` : '（无主星）'}${muts.length ? `，引动 ${muts.join('、')}` : ''}。命盘判断：<span class="q-key">${claim}</span>`,
         `请具体回想这十年里实际发生过的大事（${stageHint(dec.start)}），上面这个判断对得上吗？`,
         { range: `${dec.start}-${dec.end}` });
     });
@@ -1764,7 +1764,7 @@
       html += `<div class="${cls.join(' ')}">
         <div class="jp-tl-age">${dec.start}–${dec.end}岁${isCurrent ? '<span class="jp-tl-now">当前</span>' : ''}</div>
         <div class="jp-tl-main">
-          <div class="jp-tl-head"><span class="jp-tl-pal">${pal.name}宫</span><span class="jp-tl-stars">${ms.length ? ms.join('·') : '无主星'}</span>${muts.length ? `<span class="jp-tl-mut">${muts.join('·')}</span>` : ''}<span class="jp-tl-tone t-${tone}">${toneTxt}</span></div>
+          <div class="jp-tl-head"><span class="jp-tl-pal">${/宫$/.test(pal.name) ? pal.name : pal.name + '宫'}</span><span class="jp-tl-stars">${ms.length ? ms.join('·') : '无主星'}</span>${muts.length ? `<span class="jp-tl-mut">${muts.join('·')}</span>` : ''}<span class="jp-tl-tone t-${tone}">${toneTxt}</span></div>
           <div class="jp-tl-claim">${claim}</div>
           <div class="jp-tl-yr">${yrSpan}</div>
         </div>
