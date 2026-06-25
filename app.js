@@ -78,6 +78,76 @@
     return Math.floor((h + 1) / 2); // 丑1 寅2 … 亥11
   }
 
+  // ===== 真太阳时校正 =====
+  // 常见城市经度（东经，单位 度）。出生地在紫微斗数不参与起盘，
+  // 仅用于把「钟表时间(北京时间, 东经120°基准)」折算为「当地真太阳时」，
+  // 从而在时辰交界附近反推出更准确的时辰。
+  const CITY_LNG = {
+    '北京': 116.41, '上海': 121.47, '广州': 113.26, '深圳': 114.06,
+    '天津': 117.20, '重庆': 106.55, '成都': 104.07, '杭州': 120.16,
+    '南京': 118.80, '武汉': 114.30, '西安': 108.94, '郑州': 113.62,
+    '长沙': 112.94, '沈阳': 123.43, '哈尔滨': 126.53, '长春': 125.32,
+    '济南': 117.00, '青岛': 120.38, '合肥': 117.23, '福州': 119.30,
+    '厦门': 118.09, '南昌': 115.86, '南宁': 108.32, '昆明': 102.83,
+    '贵阳': 106.71, '兰州': 103.83, '西宁': 101.78, '银川': 106.23,
+    '太原': 112.55, '石家庄': 114.51, '呼和浩特': 111.75, '乌鲁木齐': 87.62,
+    '拉萨': 91.14, '海口': 110.20, '大连': 121.62, '宁波': 121.55,
+    '苏州': 120.62, '无锡': 120.30, '温州': 120.70, '佛山': 113.12,
+    '东莞': 113.75, '香港': 114.17, '澳门': 113.55, '台北': 121.56,
+  };
+
+  // 均时差（Equation of Time），输入 1-12 月返回该月近似分钟数（真太阳时 − 平太阳时）
+  function equationOfTime(month, day) {
+    // 以年内天数 N 估算，公式取常用近似（单位：分钟）
+    const cumDays = [0, 0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334];
+    const N = (cumDays[month] || 0) + (day || 15);
+    const B = 2 * Math.PI * (N - 81) / 364;
+    return 9.87 * Math.sin(2 * B) - 7.53 * Math.cos(B) - 1.5 * Math.sin(B);
+  }
+
+  // 根据出生地经度 + 钟表时分 + 日期，计算真太阳时对应的「小时(0-23)」
+  // 返回 { hour, minute, deltaMin }；deltaMin 为校正总分钟数
+  function trueSolarHour(lng, clockHour, clockMinute, month, day) {
+    // 经度时差：标准时区基准 120°E，每偏 1° = 4 分钟
+    const lngDelta = (lng - 120) * 4;            // 分钟
+    const eot = equationOfTime(month, day);      // 分钟
+    const deltaMin = lngDelta + eot;
+    let total = clockHour * 60 + clockMinute + deltaMin;
+    // 规整到 0–1440
+    total = ((total % 1440) + 1440) % 1440;
+    return { hour: Math.floor(total / 60), minute: Math.round(total % 60), deltaMin: deltaMin };
+  }
+
+  const TIME_LABELS = ['早子时', '丑时', '寅时', '卯时', '辰时', '巳时', '午时', '未时', '申时', '酉时', '戌时', '亥时', '晚子时'];
+
+  // 读取校正输入并更新时辰下拉 + 提示；返回是否成功应用了校正
+  function applyTrueSolarTime() {
+    const lngEl = $('birthLng'), hEl = $('birthHour'), mEl = $('birthMinute'), note = $('tstNote');
+    const lng = parseFloat(lngEl.value);
+    const ch = parseInt(hEl.value, 10);
+    const cm = mEl.value === '' ? 0 : parseInt(mEl.value, 10);
+    // 经度与钟点都需有效才计算
+    if (isNaN(lng) || isNaN(ch) || ch < 0 || ch > 23) {
+      note.style.display = 'none';
+      note.className = 'tst-note';
+      return false;
+    }
+    const mo = parseInt($('month').value, 10) || 6;
+    const da = parseInt($('day').value, 10) || 15;
+    const r = trueSolarHour(lng, ch, isNaN(cm) ? 0 : cm, mo, da);
+    const idx = hourToTimeIndex(r.hour);
+    $('timeIndex').value = idx;
+    const sign = r.deltaMin >= 0 ? '+' : '−';
+    const mm = (x) => (x < 10 ? '0' + x : '' + x);
+    note.style.display = 'block';
+    note.className = 'tst-note changed';
+    note.innerHTML =
+      `钟表时间 <b>${mm(ch)}:${mm(isNaN(cm) ? 0 : cm)}</b> ＋经度时差/均时差（${sign}${Math.abs(Math.round(r.deltaMin))} 分）` +
+      ` → 真太阳时约 <b>${mm(r.hour)}:${mm(r.minute)}</b>，已自动定为 <b>${TIME_LABELS[idx]}</b>。` +
+      `<br><span style="opacity:.8">如不需要校正，清空上方经度即可恢复手动选时辰。</span>`;
+    return true;
+  }
+
   // 顶部两条吸顶栏（topbar + tabs）的合计高度
   function stickyOffset() {
     const tb = document.querySelector('.topbar');
@@ -135,6 +205,33 @@
       p.style.display = p.style.display === 'none' ? 'block' : 'none';
     });
 
+    // 真太阳时校正：填充城市下拉 + 绑定联动
+    (function initTrueSolar() {
+      const sel = $('birthCity');
+      if (sel) {
+        Object.keys(CITY_LNG).forEach((city) => {
+          const o = document.createElement('option');
+          o.value = city; o.textContent = city;
+          sel.appendChild(o);
+        });
+        sel.addEventListener('change', () => {
+          if (sel.value && CITY_LNG[sel.value] != null) {
+            $('birthLng').value = CITY_LNG[sel.value];
+          }
+          applyTrueSolarTime();
+        });
+      }
+      ['birthLng', 'birthHour', 'birthMinute'].forEach((id) => {
+        const el = $(id);
+        if (el) el.addEventListener('input', applyTrueSolarTime);
+      });
+      // 用户手动改时辰下拉时，视为放弃校正：清空提示
+      $('timeIndex').addEventListener('change', () => {
+        const note = $('tstNote');
+        if (note) { note.style.display = 'none'; note.className = 'tst-note'; }
+      });
+    })();
+
     initTabs();
     initDingpan();
     syncJiepan();
@@ -181,12 +278,19 @@
     }
 
     const dateStr = `${y}-${m}-${d}`;
+    // 排盘前：若填了真太阳时校正，先据此确定时辰下标
+    applyTrueSolarTime();
     const timeIndex = parseInt($('timeIndex').value, 10);
     const gender = state.gender;
     const rawName = $('name').value.trim();
     const name = rawName || '匿名';
     const timeSel = $('timeIndex');
     const timeName = (timeSel && timeSel.options[timeSel.selectedIndex]) ? timeSel.options[timeSel.selectedIndex].text : '';
+    const tstCity = $('birthCity') ? $('birthCity').value : '';
+    const tstLng = $('birthLng') ? parseFloat($('birthLng').value) : NaN;
+    const tstClock = ($('birthHour') && $('birthHour').value !== '')
+      ? (($('birthHour').value || '') + ':' + ($('birthMinute').value || '00')) : '';
+    const tstUsed = !isNaN(tstLng) && tstClock !== '';
 
     // 埋点：排盘提交（明文上报完整输入信息）
     trk('paipan_submit', {
@@ -200,6 +304,10 @@
       birth_day: d,
       time_index: timeIndex,
       time_name: timeName,
+      tst_used: tstUsed,
+      tst_city: tstCity,
+      tst_lng: isNaN(tstLng) ? '' : tstLng,
+      tst_clock: tstClock,
     });
 
     try {
