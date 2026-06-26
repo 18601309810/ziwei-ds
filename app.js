@@ -1449,10 +1449,11 @@
         } else if (nav === 'dojiepan') {
           trk('jiepan_unlock', { score: state.dpScore, from: 'dingpan_result' });
           trk('jiepan_generate', { score: state.dpScore });
+          // 同时生成通俗版与专业版内容，默认跳转到通俗版 tab
           state.jiepan.unlocked = true;
           state.jiepan.html = buildJiepan(state.data);
-          switchTab('jiepan');
-          syncJiepan();
+          state.jiepanLite.html = buildJiepanLite(state.data);
+          switchTab('jiepan-lite');
           // 保持 tab 吸顶，仅滚动到解盘内容顶部（不露出上方个人信息表单）
           requestAnimationFrame(function () { scrollToContentTop(true); });
         }
