@@ -69,7 +69,8 @@
     dpScore: null,                       // 最近一次定盘契合分
     dpDetail: null,                      // 最近一次定盘四维分项明细
     tst: { used: false },                // 真太阳时换算详情
-    jiepan: { unlocked: false, html: '' }, // 解盘解锁状态与已生成内容
+    jiepan: { unlocked: false, html: '' }, // 解盘(专业)解锁状态与已生成内容
+    jiepanLite: { html: '' },              // 解盘(通俗)已生成内容缓存
   };
   const JIEPAN_PASS = 70;                 // 解盘解锁所需契合分
 
@@ -372,7 +373,7 @@
     });
     if (key !== prev) trk('tab_switch', { from: prev, to: key });
     if (key === 'dingpan') { trk('dingpan_enter', {}); syncDingpan(); }
-    if (key === 'jiepan-lite') { trk('jiepan_lite_enter', {}); }
+    if (key === 'jiepan-lite') { trk('jiepan_lite_enter', {}); syncJiepanLite(); }
     if (key === 'jiepan') { trk('jiepan_enter', {}); syncJiepan(); }
     if (opts.scroll) requestAnimationFrame(function () { scrollToContentTop(true); });
   }
@@ -382,17 +383,27 @@
     tabs.querySelectorAll('.tab').forEach((btn) => {
       btn.addEventListener('click', () => switchTab(btn.dataset.tab, { scroll: true }));
     });
-    // 通俗版占位区的「前往专业版」按钮
-    const litePane = $('tab-jiepan-lite');
-    if (litePane) {
-      const proBtn = litePane.querySelector('[data-gnav="jiepan-pro"]');
-      if (proBtn) {
-        proBtn.addEventListener('click', () => {
-          trk('jiepan_lite_to_pro', {});
-          switchTab('jiepan', { scroll: true });
-        });
-      }
-    }
+    // 通俗版占位区（首次进入前的静态 HTML）的「前往专业版」按钮；
+    // 一旦命盘就绪，syncJiepanLite 会整体重渲染本 pane 并自行绑定按钮。
+    bindLiteGate($('tab-jiepan-lite'));
+  }
+
+  // 绑定通俗版 pane 内的跳转按钮（前往排盘 / 前往专业版）
+  function bindLiteGate(pane) {
+    if (!pane) return;
+    pane.querySelectorAll('[data-gnav]').forEach((btn) => {
+      if (btn.__bound) return;
+      btn.__bound = true;
+      btn.addEventListener('click', () => {
+        const nav = btn.dataset.gnav;
+        if (nav === 'jiepan-pro') { trk('jiepan_lite_to_pro', {}); switchTab('jiepan', { scroll: true }); }
+        else if (nav === 'paipan') {
+          trk('nav_repaipan', { from: 'jiepan_lite_gate' });
+          switchTab('paipan', { scroll: true });
+          $('formPanel').style.display = 'block';
+        } else if (nav === 'dingpan') { switchTab('dingpan', { scroll: true }); }
+      });
+    });
   }
 
   // ---------- 排盘主流程 ----------
@@ -500,7 +511,9 @@
       state.dpAnswers = {};
       state.dpScore = null;
       state.jiepan = { unlocked: false, html: '' };
+      state.jiepanLite = { html: '' };
       syncJiepan();
+      syncJiepanLite();
       // 滚动到排盘内容顶部，落在吸顶栏下方（避免盘面被遮挡）
       requestAnimationFrame(function () { scrollToContentTop(true); });
     } catch (e) {
@@ -1830,6 +1843,461 @@
     }
     if (!rows.length) return '';
     return '<div class="jp-yf">' + rows.join('') + '</div>';
+  }
+
+  // ========================================================================
+  // ============ 解盘(通俗版) · 趣味命盘 buildJiepanLite ====================
+  // 复用专业版全部数据算法，只做「说人话」的翻译层，不新增任何玄学结论。
+  // ========================================================================
+
+  // 命宫主星 -> RPG 式称号
+  const LITE_TITLE = {
+    '紫微': { name: '掌舵型领袖', emoji: '👑', line: '天生气场全开，走到哪都想当主心骨' },
+    '天府': { name: '稳健型大管家', emoji: '🏛️', line: '守得住、攒得下，安全感就是你的超能力' },
+    '天机': { name: '智多星军师', emoji: '🧠', line: '脑子转得比谁都快，点子多到用不完' },
+    '太阳': { name: '发光发热社牛', emoji: '☀️', line: '热情外放，天生爱照亮别人' },
+    '武曲': { name: '实干派财将', emoji: '💪', line: '说做就做，对钱和效率超敏感' },
+    '天同': { name: '治愈系福星', emoji: '🍮', line: '温温柔柔会享受，是大家的开心果' },
+    '廉贞': { name: '魅力系多面手', emoji: '🎭', line: '感性又有手腕，气场独特很难被忽略' },
+    '太阴': { name: '温柔治愈系', emoji: '🌙', line: '细腻念旧，是默默积累的隐藏高手' },
+    '贪狼': { name: '八面玲珑社交家', emoji: '🦊', line: '多才多艺人缘旺，走到哪都吃得开' },
+    '巨门': { name: '专业嘴强王者', emoji: '🎤', line: '能讲能辩，靠一张嘴和真本事立身' },
+    '天相': { name: '靠谱型最佳辅佐', emoji: '🤝', line: '体面又会协调，是团队的定海神针' },
+    '天梁': { name: '老成型守护者', emoji: '🛡️', line: '有原则会照顾人，遇事能逢凶化吉' },
+    '七杀': { name: '开疆拓土猛将', emoji: '⚔️', line: '独立有冲劲，不服输、敢拼命' },
+    '破军': { name: '破局型先锋', emoji: '🌊', line: '敢破敢立爱折腾，从零到一是你的主场' },
+  };
+  // 格局 -> 称号覆盖（命中则优先用更有「人设感」的组合称号）
+  const LITE_PATTERN_TITLE = {
+    '紫府同宫格': { name: '天生掌权·大格局玩家', emoji: '👑', line: '领导力 + 守成力双 buff，格局厚重稳得住' },
+    '紫府朝垣格': { name: '贵气加持·资源型选手', emoji: '👑', line: '一路有贵人和资源助攻，行事稳健' },
+    '杀破狼格': { name: '人生开挂·变动型猛人', emoji: '🌊', line: '一生大开大合，越折腾越有戏，最怕安于现状' },
+    '机月同梁格': { name: '稳扎稳打·专业型上班族', emoji: '📐', line: '走专业安稳路线最香，忌大起大落瞎冒险' },
+    '日月同宫格': { name: '阴阳调和·才华横溢型', emoji: '🌗', line: '内外兼修、感性理性都在线' },
+    '武贪格': { name: '中晚年开挂·厚积薄发型', emoji: '📈', line: '前期攒经验、后期大爆发，越往后越值钱' },
+    '机梁格': { name: '智囊顾问·谋略型', emoji: '🧩', line: '点子多、会化解，天生军师/顾问命' },
+    '君臣庆会': { name: '贵人环绕·团队型领袖', emoji: '🌟', line: '身边总有得力助手，事业容易成气候' },
+  };
+  // 宫位 -> 通俗领域名
+  const LITE_FIELD = {
+    '官禄': '事业线', '命宫': '主角光环', '迁移': '在外机遇', '财帛': '财富线',
+    '田宅': '家业/不动产', '夫妻': '感情线', '子女': '桃花/子女/创作', '疾厄': '健康线',
+    '福德': '内心/福气', '仆役': '人脉圈', '交友': '人脉圈', '兄弟': '兄弟手足', '父母': '长辈/贵人',
+  };
+
+  // 单宫「元气值」0-99：有无主星 + 庙旺 + 四化 + 吉煞，作为六维评分底座
+  function palVitality(d, palName) {
+    const p = findPalace(d, palName);
+    if (!p) return 50;
+    let s = 52;
+    if (!majorNames(p).length) s -= 5; // 借对宫，略减
+    [...p.majorStars, ...p.minorStars].forEach((st) => {
+      if (['庙', '旺'].includes(st.brightness)) s += 7;
+      else if (['得', '利'].includes(st.brightness)) s += 3;
+      else if (['陷', '不'].includes(st.brightness)) s -= 7;
+      if (st.mutagen === '禄') s += 9;
+      else if (st.mutagen === '权') s += 7;
+      else if (st.mutagen === '科') s += 5;
+      else if (st.mutagen === '忌') s -= 9;
+    });
+    const aux = palaceAux(d, palName);
+    s += aux.lucky.length * 4;
+    s -= aux.harsh.length * 5;
+    return Math.max(12, Math.min(99, Math.round(s)));
+  }
+  const avg = (arr) => Math.round(arr.reduce((a, b) => a + b, 0) / arr.length);
+  // 命盘是否含某主星（在指定宫的主+辅星里）
+  function palHasStar(d, palName, names) {
+    const p = findPalace(d, palName);
+    if (!p) return false;
+    const set = new Set([...p.majorStars, ...p.minorStars, ...p.adjectiveStars].map((s) => s.name));
+    return names.some((n) => set.has(n));
+  }
+
+  // 六维能力值
+  function liteRadarScores(d) {
+    const soulV = palVitality(d, '命宫');
+    let wisdom = avg([soulV, palVitality(d, '福德')]);
+    if (palHasStar(d, '命宫', ['文昌', '文曲', '天机', '巨门', '太阴'])) wisdom += 6;
+    if (palHasStar(d, '福德', ['文昌', '文曲', '天机'])) wisdom += 4;
+    let action = soulV;
+    if (palHasStar(d, '命宫', ['七杀', '破军', '贪狼', '武曲', '太阳'])) action += 7;
+    if (palHasStar(d, '命宫', ['火星', '铃星', '擎羊'])) action += 4; // 煞星增冲劲
+    if (palHasStar(d, '命宫', ['天同', '天相', '太阴'])) action -= 3;
+    const clamp = (v) => Math.max(12, Math.min(99, Math.round(v)));
+    return [
+      { key: '事业', val: clamp(avg([palVitality(d, '官禄'), soulV])) },
+      { key: '财运', val: clamp(avg([palVitality(d, '财帛'), palVitality(d, '田宅')])) },
+      { key: '感情', val: clamp(palVitality(d, '夫妻')) },
+      { key: '人际', val: clamp(avg([palVitality(d, '交友') || palVitality(d, '仆役'), palVitality(d, '迁移')])) },
+      { key: '智慧', val: clamp(wisdom) },
+      { key: '行动', val: clamp(action) },
+    ];
+  }
+  // 分值 -> 评级词
+  function liteGrade(v) {
+    if (v >= 85) return { w: '满级', c: 'lv5' };
+    if (v >= 72) return { w: '旺盛', c: 'lv4' };
+    if (v >= 58) return { w: '在线', c: 'lv3' };
+    if (v >= 42) return { w: '成长中', c: 'lv2' };
+    return { w: '待修炼', c: 'lv1' };
+  }
+
+  // 六维雷达 SVG
+  function liteRadarSvg(scores) {
+    const cx = 150, cy = 140, R = 96;
+    const n = scores.length;
+    const pt = (i, r) => {
+      const ang = -Math.PI / 2 + (i * 2 * Math.PI) / n;
+      return [cx + r * Math.cos(ang), cy + r * Math.sin(ang)];
+    };
+    let grid = '';
+    [0.25, 0.5, 0.75, 1].forEach((f) => {
+      const pts = scores.map((_, i) => pt(i, R * f).map((x) => x.toFixed(1)).join(',')).join(' ');
+      grid += `<polygon points="${pts}" class="rdr-grid"/>`;
+    });
+    let axes = '';
+    scores.forEach((_, i) => { const [x, y] = pt(i, R); axes += `<line x1="${cx}" y1="${cy}" x2="${x.toFixed(1)}" y2="${y.toFixed(1)}" class="rdr-axis"/>`; });
+    const valPts = scores.map((s, i) => pt(i, R * (s.val / 100)).map((x) => x.toFixed(1)).join(',')).join(' ');
+    let labels = '';
+    scores.forEach((s, i) => {
+      const [x, y] = pt(i, R + 24);
+      const anchor = Math.abs(x - cx) < 6 ? 'middle' : (x > cx ? 'start' : 'end');
+      const g = liteGrade(s.val);
+      labels += `<text x="${x.toFixed(1)}" y="${(y - 2).toFixed(1)}" text-anchor="${anchor}" class="rdr-lab">${s.key}</text>`;
+      labels += `<text x="${x.toFixed(1)}" y="${(y + 13).toFixed(1)}" text-anchor="${anchor}" class="rdr-val rdr-${g.c}">${s.val}</text>`;
+    });
+    let dots = '';
+    scores.forEach((s, i) => { const [x, y] = pt(i, R * (s.val / 100)); dots += `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3.2" class="rdr-dot"/>`; });
+    return `<svg class="lite-radar-svg" viewBox="0 0 300 290" xmlns="http://www.w3.org/2000/svg" aria-label="天赋能力雷达">
+      ${grid}${axes}
+      <polygon points="${valPts}" class="rdr-area"/>
+      ${dots}${labels}
+    </svg>`;
+  }
+
+  // 进度条
+  function liteBar(val, cls) {
+    return `<div class="lite-bar"><div class="lite-bar-fill ${cls || ''}" style="width:${val}%"></div></div>`;
+  }
+
+  // ===== 七大模块 =====
+
+  // 模块1：命格名片
+  function liteCardName(d, patterns) {
+    const ms = pMajors(d, '命宫');
+    const own = majorNames(findPalace(d, '命宫'));
+    const primary = ms[0] || '';
+    let title = LITE_TITLE[primary] || { name: '神秘命格', emoji: '✨', line: '命宫格局灵活，人生由你自己定义' };
+    // 格局覆盖
+    const hitPat = (patterns || []).find((p) => LITE_PATTERN_TITLE[p.name]);
+    if (hitPat) title = LITE_PATTERN_TITLE[hitPat.name];
+    // 标签
+    const tagSet = [];
+    ms.forEach((n) => { if (STAR_TAGS[n]) tagSet.push(...STAR_TAGS[n]); });
+    const tags = Array.from(new Set(tagSet)).slice(0, 5);
+    const tone = overallTone(d);
+    const borrowNote = own.length ? '' : '<span class="lite-name-borrow">命宫无主星 · 借对宫之势</span>';
+    return `<section class="lite-card lite-name-card">
+      <div class="lite-name-avatar">${title.emoji}</div>
+      <div class="lite-name-title">${title.name}</div>
+      <div class="lite-name-line">${title.line}</div>
+      <div class="lite-tags">${tags.map((t) => `<span class="lite-tag">${t}</span>`).join('')}</div>
+      ${borrowNote}
+      <div class="lite-name-base">
+        <span>${d.gender}生</span><i>·</i><span>属${d.zodiac}</span><i>·</i><span>命宫坐${ms.length ? ms.join('·') : '—'}</span>
+      </div>
+      <div class="lite-name-tone">全盘基调：<b>${tone.word}</b></div>
+    </section>`;
+  }
+
+  // 模块2：天赋能力雷达
+  function liteCardRadar(d, scores) {
+    const sorted = [...scores].sort((a, b) => b.val - a.val);
+    const top = sorted[0], low = sorted[sorted.length - 1];
+    return `<section class="lite-card">
+      <div class="lite-h"><span class="lite-h-ico">📊</span>天赋能力雷达<em>六维属性面板</em></div>
+      <div class="lite-radar-wrap">${liteRadarSvg(scores)}</div>
+      <div class="lite-radar-list">
+        ${scores.map((s) => { const g = liteGrade(s.val); return `<div class="lite-rl-row"><span class="lite-rl-k">${s.key}</span>${liteBar(s.val, 'g-' + g.c)}<span class="lite-rl-v rdr-${g.c}">${s.val} ${g.w}</span></div>`; }).join('')}
+      </div>
+      <p class="lite-note">你的最强属性是 <b class="lite-hot">${top.key}（${top.val}）</b>，天生占优；<b>${low.key}（${low.val}）</b>相对是短板，后天多补强就能拉平。<span class="lite-tip" title="满级/旺盛 ≈ 命理里的「庙旺得地」，待修炼 ≈「落陷」">?</span></p>
+    </section>`;
+  }
+
+  // 模块3：天生牌面（生年四化 -> 外挂/小Boss/锦囊）
+  function liteCardMutagen(d) {
+    const mt = mutByType(d);
+    const buffs = [];
+    ['禄', '权', '科'].forEach((m) => {
+      mt[m].forEach((x) => {
+        const field = LITE_FIELD[x.palace] || x.palace;
+        const desc = m === '禄' ? `自带顺风 buff，是你天生开挂、容易出成果的领域`
+          : m === '权' ? `掌控力拉满，越主动出击越吃香`
+            : `自带贵人与名声光环，关键时刻容易逢凶化吉`;
+        buffs.push({ m, star: x.star, field, desc });
+      });
+    });
+    const bosses = mt['忌'].map((x) => ({ star: x.star, field: LITE_FIELD[x.palace] || x.palace, pal: x.palace }));
+    let html = `<section class="lite-card">
+      <div class="lite-h"><span class="lite-h-ico">🎮</span>天生牌面<em>出生自带的外挂与小 Boss</em></div>`;
+    // 外挂
+    html += '<div class="lite-sub">🟢 人生外挂（天生加成）</div>';
+    if (buffs.length) {
+      html += '<div class="lite-buff-list">';
+      buffs.forEach((b) => {
+        html += `<div class="lite-buff"><span class="lite-buff-badge m-${b.m}">化${b.m}</span><div class="lite-buff-body"><b>${b.field}</b> · ${b.star}<p>${b.desc}</p></div></div>`;
+      });
+      html += '</div>';
+    } else { html += '<p class="lite-note">本局没有特别突出的外挂，属于「全靠自己努力」型，反而更扎实。</p>'; }
+    // 小Boss
+    html += '<div class="lite-sub" style="margin-top:14px">🔴 人生小 Boss（必修关卡）</div>';
+    if (bosses.length) {
+      html += '<div class="lite-boss-list">';
+      bosses.forEach((b) => {
+        const cnt = OPP_PALACE[b.pal] ? `，还会连带影响「${LITE_FIELD[OPP_PALACE[b.pal]] || OPP_PALACE[b.pal]}」` : '';
+        html += `<div class="lite-boss"><span class="lite-boss-badge">忌</span><div class="lite-buff-body"><b>${b.field}</b> · ${b.star}<p>这是你这一局要慢慢打的大 Boss，容易卡在这块、放不下${cnt}。别硬刚，耐心刷级、稳扎稳打就能过。</p></div></div>`;
+      });
+      html += '</div>';
+    } else { html += '<p class="lite-good">✦ 恭喜！本局没有明显的硬核 Boss，先天阻碍较少，打得相对顺。</p>'; }
+    html += '</section>';
+    return html;
+  }
+
+  // 模块4：人生四大副本（事业/搞钱/恋爱/社交）
+  function liteCardModes(d) {
+    const modes = [
+      { ico: '💼', name: '事业副本', pal: '官禄', star0: pMajors(d, '官禄')[0], map: STAR_CAREER, key: 'style' },
+      { ico: '💰', name: '搞钱副本', pal: '财帛', star0: pMajors(d, '财帛')[0], map: STAR_WEALTH, txt: true },
+      { ico: '💕', name: '恋爱副本', pal: '夫妻', star0: pMajors(d, '夫妻')[0], map: STAR_LOVE, txt: true },
+      { ico: '🤝', name: '社交副本', pal: '交友', star0: pMajors(d, '交友')[0] || pMajors(d, '迁移')[0], persona: true },
+    ];
+    let html = `<section class="lite-card">
+      <div class="lite-h"><span class="lite-h-ico">🗺️</span>人生四大副本<em>各战线的玩法与强度</em></div>
+      <div class="lite-mode-grid">`;
+    modes.forEach((mo) => {
+      const v = palVitality(d, mo.pal);
+      const g = liteGrade(v);
+      let line = '';
+      if (mo.star0) {
+        if (mo.persona) line = (STAR_PERSONA[mo.star0] || '').split('；')[0];
+        else if (mo.txt) line = mo.map[mo.star0] || '';
+        else line = (mo.map[mo.star0] && mo.map[mo.star0].style) || '';
+      }
+      if (!line) line = '这条线主星不明显，靠后天用心经营，可塑性高。';
+      html += `<div class="lite-mode">
+        <div class="lite-mode-top"><span class="lite-mode-ico">${mo.ico}</span><b>${mo.name}</b><span class="lite-mode-lv rdr-${g.c}">${g.w} ${v}</span></div>
+        ${liteBar(v, 'g-' + g.c)}
+        <p class="lite-mode-desc">${mo.star0 ? '主星 ' + mo.star0 + '：' : ''}${line}。</p>
+      </div>`;
+    });
+    html += '</div></section>';
+    return html;
+  }
+
+  // 模块5：隐藏属性（福德/疾厄/自化）
+  function liteCardHidden(d) {
+    const fudeMs = pMajors(d, '福德')[0];
+    const jiMs = pMajors(d, '疾厄')[0];
+    const innerOS = fudeMs && STAR_PERSONA[fudeMs] ? STAR_PERSONA[fudeMs].split('；')[0] : '内心戏丰富，重精神感受';
+    // 自化（隐藏debuff）
+    const selfList = [];
+    d.palaces.forEach((p) => {
+      selfMutagen(d, p.name).forEach((s) => {
+        const tip = s.mut === '忌' ? '容易自己跟自己较劲、内耗'
+          : s.mut === '禄' ? '看着顺、其实福气悄悄流走，要惜福'
+            : s.mut === '权' ? '容易用力过猛、爱逞强'
+              : '有点爱面子、好名头';
+        selfList.push(`「${LITE_FIELD[p.name] || p.name}」自化${s.mut}——${tip}`);
+      });
+    });
+    const items = [
+      { ico: '🫧', k: '内心 OS', v: innerOS },
+      { ico: '🩺', k: '身体小提醒', v: '先天体质偏「' + (jiMs || '平和') + '」型，' + (jiMs ? '留意与其相关的部位，规律作息最养人' : '整体均衡，注意劳逸结合') },
+    ];
+    let html = `<section class="lite-card">
+      <div class="lite-h"><span class="lite-h-ico">🔍</span>隐藏属性<em>不仔细看会错过的小设定</em></div>
+      <div class="lite-hidden-list">`;
+    items.forEach((it) => { html += `<div class="lite-hidden"><span class="lite-hidden-ico">${it.ico}</span><div><b>${it.k}</b><p>${it.v}。</p></div></div>`; });
+    html += `<div class="lite-hidden"><span class="lite-hidden-ico">🕳️</span><div><b>隐藏 debuff（自化）</b><p>${selfList.length ? selfList.join('；') + '。属于「没人惹你、自己跟自己过不去」的暗坑，意识到就能少踩。' : '本局没有明显自化暗坑，能量不太自我空耗，难得的稳定结构。'}</p></div></div>`;
+    html += '</div></section>';
+    return html;
+  }
+
+  // 模块6：人生闯关进度条（大限 + 当前流年）
+  function liteCardJourney(d) {
+    const age = approxAge(d);
+    const by = birthYear(d);
+    const decs = d.palaces
+      .filter((p) => p.decadal && p.decadal.range && Array.isArray(p.decadal.range))
+      .map((p) => ({ pal: p, start: p.decadal.range[0], end: p.decadal.range[1] }))
+      .sort((a, b) => a.start - b.start);
+    let html = `<section class="lite-card">
+      <div class="lite-h"><span class="lite-h-ico">🎯</span>人生闯关进度<em>你正在打第几关</em></div>`;
+    if (!decs.length) { html += '<p class="lite-note">本盘大限信息从略。</p></section>'; return html; }
+    html += '<div class="lite-journey">';
+    decs.forEach((dec, i) => {
+      const pal = dec.pal;
+      const ms = majorNames(pal).length ? majorNames(pal) : pMajors(d, pal.name);
+      const muts = [...pal.majorStars, ...pal.minorStars].filter((s) => s.mutagen).map((s) => s.mutagen);
+      const hasJi = muts.includes('忌');
+      const hasGood = muts.some((m) => m !== '忌');
+      const tone = hasGood && !hasJi ? 'good' : (hasJi && !hasGood ? 'tough' : 'mid');
+      const isCur = age && age >= dec.start && age <= dec.end;
+      const past = age && dec.end < age;
+      const cls = ['lite-jn', tone]; if (isCur) cls.push('cur'); if (past) cls.push('past');
+      const field = LITE_FIELD[pal.name] || pal.name;
+      html += `<div class="${cls.join(' ')}">
+        <div class="lite-jn-stage">第${i + 1}关${isCur ? '<span class="lite-jn-now">当前</span>' : ''}</div>
+        <div class="lite-jn-age">${dec.start}-${dec.end}岁${by ? ` · ${by + dec.start - 1}起` : ''}</div>
+        <div class="lite-jn-theme">${field}主场<br><em>${ms.length ? ms.join('·') : '无主星'}</em></div>
+      </div>`;
+    });
+    html += '</div>';
+    // 当前关卡运势预告
+    const cur = decs.find((x) => age && age >= x.start && age <= x.end);
+    if (cur) {
+      const muts = [...cur.pal.majorStars, ...cur.pal.minorStars].filter((s) => s.mutagen).map((s) => s.name + '化' + s.mutagen);
+      const hasJi = muts.some((m) => m.endsWith('忌'));
+      const fore = hasJi ? '这十年挑战和成长并存，遇事稳一点、别冲动，熬过去就是升级。'
+        : (muts.length ? '这十年顺风局偏多，是适合主动出击、把握机会的阶段。' : '这十年节奏平稳，靠踏实积累稳步上分。');
+      html += `<p class="lite-fore"><b>当前关卡预告：</b>${fore}</p>`;
+    }
+    html += '</section>';
+    return html;
+  }
+
+  // 模块7：命格精华卡（可截图分享）
+  function liteCardShare(d, scores, patterns) {
+    const ms = pMajors(d, '命宫');
+    const primary = ms[0] || '';
+    let title = LITE_TITLE[primary] || { name: '神秘命格', emoji: '✨', line: '' };
+    const hitPat = (patterns || []).find((p) => LITE_PATTERN_TITLE[p.name]);
+    if (hitPat) title = LITE_PATTERN_TITLE[hitPat.name];
+    const sorted = [...scores].sort((a, b) => b.val - a.val);
+    const tone = overallTone(d);
+    return `<section class="lite-card lite-share-sec">
+      <div class="lite-h"><span class="lite-h-ico">🎴</span>命格精华卡<em>一图带走 · 截图分享</em></div>
+      <div class="lite-share-card" id="liteShareCard">
+        <div class="lite-sc-bg"></div>
+        <div class="lite-sc-top">紫微斗数 · 命格精华</div>
+        <div class="lite-sc-avatar">${title.emoji}</div>
+        <div class="lite-sc-title">${title.name}</div>
+        <div class="lite-sc-line">${title.line}</div>
+        <div class="lite-sc-stats">
+          ${scores.map((s) => `<div class="lite-sc-stat"><span class="lite-sc-val">${s.val}</span><span class="lite-sc-key">${s.key}</span></div>`).join('')}
+        </div>
+        <div class="lite-sc-foot">
+          <div class="lite-sc-row">最强天赋：<b>${sorted[0].key}</b> · 全盘基调：<b>${tone.word}</b></div>
+          <div class="lite-sc-brand">由「紫微斗数排盘」生成 · 仅供娱乐</div>
+        </div>
+      </div>
+      <div class="lite-share-actions">
+        <button class="btn-primary" data-act="share-lite">📸 保存分享卡图片</button>
+        <button class="lite-btn-ghost" data-gnav="jiepan-pro">想看专业详批 →</button>
+      </div>
+    </section>`;
+  }
+
+  // 总装：通俗版解盘
+  function buildJiepanLite(d) {
+    const patterns = detectPatterns(d);
+    const scores = liteRadarScores(d);
+    const L = [];
+    L.push('<div class="lite-wrap">');
+    L.push(`<div class="lite-intro">🌈 下面是用大白话 + 游戏术语帮你翻译的命盘，30 秒看懂自己。所有结论都和「解盘(专业)」同一套盘面数据，只是换了「说人话」的皮。</div>`);
+    L.push(liteCardName(d, patterns));
+    L.push(liteCardRadar(d, scores));
+    L.push(liteCardMutagen(d));
+    L.push(liteCardModes(d));
+    L.push(liteCardHidden(d));
+    L.push(liteCardJourney(d));
+    L.push(liteCardShare(d, scores, patterns));
+    L.push(`<div class="lite-disclaimer">🌟 命盘是认识自己的一面镜子，不是人生的标准答案。这里的称号、分值、外挂都是为了好玩、好懂，真正的人生还是靠你自己一关关打出来。想深究每个结论背后的命理依据，去「解盘(专业)」看完整详批。</div>`);
+    L.push('</div>');
+    return L.join('\n');
+  }
+
+  // 通俗版同步：与专业版共享三态门禁，达标后直接展示（无需额外解锁步骤）
+  function syncJiepanLite() {
+    const pane = $('tab-jiepan-lite');
+    if (!pane) return;
+    const hasChart = !!state.data;
+    const score = state.dpScore;
+    const viewing = pane.classList.contains('active');
+
+    if (!hasChart) {
+      pane.innerHTML = liteGate('🌱', '先生成命盘，才能玩通俗版',
+        '通俗版会把你的命盘翻译成「人设卡 + 能力雷达 + 人生攻略」，好玩又好懂。但得先有一张校验过的命盘——请先去排盘填出生信息，再做定盘校验时辰。',
+        '前往排盘 →', 'paipan');
+      if (viewing) trk('jiepan_lite_gate', { reason: 'no_chart' });
+      bindLiteGate(pane);
+      return;
+    }
+    const done = score !== null && score !== undefined;
+    const passed = done && score >= JIEPAN_PASS;
+    if (!passed) {
+      if (done) {
+        pane.innerHTML = liteGate('🎯', '差一步 · 时辰还没校验通过',
+          `通俗版和专业版一样，得在「定盘」契合分达到 <b>${JIEPAN_PASS}</b> 分后才开放。你当前是 <b style="color:#d2664f">${score}</b> 分，时辰可能有偏差，先回去核对一下会更准。`,
+          '回到定盘校验 →', 'dingpan');
+        if (viewing) trk('jiepan_lite_gate', { reason: 'low_score', score: score });
+      } else {
+        pane.innerHTML = liteGate('🎯', '还差一步 · 先做定盘校验',
+          '命盘已生成，再花两分钟做个「定盘」——通过几道题核对出生时辰准不准。契合分达到 ' + JIEPAN_PASS + ' 分就解锁通俗版啦。',
+          '前往定盘 →', 'dingpan');
+        if (viewing) trk('jiepan_lite_gate', { reason: 'no_dingpan' });
+      }
+      bindLiteGate(pane);
+      return;
+    }
+    // 达标：渲染通俗版
+    if (!state.jiepanLite.html) state.jiepanLite.html = buildJiepanLite(state.data);
+    pane.innerHTML = state.jiepanLite.html;
+    bindLiteGate(pane);
+    bindLiteShare(pane);
+  }
+
+  function liteGate(icon, title, desc, btnText, nav) {
+    return `<div class="jp-gate">
+      <div class="jp-gate-ico">${icon}</div>
+      <h2>${title}</h2>
+      <p>${desc}</p>
+      <div class="jp-gate-steps">
+        <span class="step ${state.data ? 'done' : 'on'}">1 排盘</span>
+        <span class="step-arr">→</span>
+        <span class="step ${state.dpScore >= JIEPAN_PASS ? 'done' : (state.data ? 'on' : '')}">2 定盘</span>
+        <span class="step-arr">→</span>
+        <span class="step ${state.dpScore >= JIEPAN_PASS ? 'done' : ''}">3 通俗解盘</span>
+      </div>
+      <button class="btn-primary jp-gate-btn" data-gnav="${nav}">${btnText}</button>
+    </div>`;
+  }
+
+  // 分享卡截图导出
+  function bindLiteShare(pane) {
+    const btn = pane.querySelector('[data-act="share-lite"]');
+    if (!btn || btn.__bound) return;
+    btn.__bound = true;
+    btn.addEventListener('click', () => {
+      const card = pane.querySelector('#liteShareCard');
+      if (!card || typeof html2canvas === 'undefined') { showErr && showErr('截图组件未就绪'); return; }
+      const old = btn.textContent;
+      btn.textContent = '生成中...';
+      btn.disabled = true;
+      trk('jiepan_lite_share', {});
+      html2canvas(card, { scale: 2, backgroundColor: null, useCORS: true, logging: false })
+        .then((canvas) => {
+          const link = document.createElement('a');
+          const nm = (state.data && state.data.name) ? state.data.name : '命格';
+          link.download = `命格精华卡_${nm}.png`;
+          link.href = canvas.toDataURL('image/png');
+          link.click();
+          btn.textContent = old;
+          btn.disabled = false;
+        })
+        .catch((e) => { console.error(e); btn.textContent = old; btn.disabled = false; });
+    });
   }
 
   function buildJiepan(d) {
