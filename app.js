@@ -366,12 +366,13 @@
     const tabs = $('tabs');
     const prev = (tabs.querySelector('.tab.active') || {}).dataset ? tabs.querySelector('.tab.active').dataset.tab : '';
     tabs.querySelectorAll('.tab').forEach((b) => b.classList.toggle('active', b.dataset.tab === key));
-    ['paipan', 'dingpan', 'jiepan'].forEach((k) => {
+    ['paipan', 'dingpan', 'jiepan-lite', 'jiepan'].forEach((k) => {
       const pane = $('tab-' + k);
       if (pane) pane.classList.toggle('active', k === key);
     });
     if (key !== prev) trk('tab_switch', { from: prev, to: key });
     if (key === 'dingpan') { trk('dingpan_enter', {}); syncDingpan(); }
+    if (key === 'jiepan-lite') { trk('jiepan_lite_enter', {}); }
     if (key === 'jiepan') { trk('jiepan_enter', {}); syncJiepan(); }
     if (opts.scroll) requestAnimationFrame(function () { scrollToContentTop(true); });
   }
@@ -381,6 +382,17 @@
     tabs.querySelectorAll('.tab').forEach((btn) => {
       btn.addEventListener('click', () => switchTab(btn.dataset.tab, { scroll: true }));
     });
+    // 通俗版占位区的「前往专业版」按钮
+    const litePane = $('tab-jiepan-lite');
+    if (litePane) {
+      const proBtn = litePane.querySelector('[data-gnav="jiepan-pro"]');
+      if (proBtn) {
+        proBtn.addEventListener('click', () => {
+          trk('jiepan_lite_to_pro', {});
+          switchTab('jiepan', { scroll: true });
+        });
+      }
+    }
   }
 
   // ---------- 排盘主流程 ----------

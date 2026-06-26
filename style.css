@@ -100,7 +100,7 @@ body {
 
 /* ========== Tab 切换（胶囊下划线风格，区别于基础信息卡片） ========== */
 .tabs {
-  display: flex; gap: 28px;
+  display: flex; gap: 22px;
   position: sticky; top: 64px; z-index: 40;
   margin: 0 -14px 18px; padding: 0 20px;
   border-bottom: 2px solid #e7ddc9;
@@ -687,4 +687,11 @@ body {
   .jp-mut-grid { grid-template-columns: repeat(2, 1fr); }
   .jp-arc-row .k { width: 72px; }
   .jp-yf-yr { width: 48px; font-size: 15px; }
+  /* 四个 tab 在窄屏的紧凑布局：压缩间距、可横向滚动、隐藏图标省空间 */
+  .tabs { gap: 0; justify-content: space-between; padding: 0 6px;
+    overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tabs .tab { font-size: 13.5px; letter-spacing: 0; padding: 11px 6px 12px;
+    gap: 4px; white-space: nowrap; flex: 0 0 auto; }
+  .tabs .tab .tab-ico { display: none; }
 }
